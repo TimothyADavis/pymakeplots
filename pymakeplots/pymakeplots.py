@@ -17,14 +17,15 @@ from matplotlib.offsetbox import AnchoredText
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredEllipse,AnchoredSizeBar
 from astropy.coordinates import ICRS
 import matplotlib.gridspec as gridspec
+from astropy.table import Table
 
 def rotateImage(img, angle, pivot):
-    padX = [img.shape[1] - pivot[0], pivot[0]]
-    padY = [img.shape[0] - pivot[1], pivot[1]]
+    padX = [img.shape[0] - pivot[0], pivot[0]]
+    padY = [img.shape[1] - pivot[1], pivot[1]]
     padZ = [0,0]
     imgP = np.pad(img, [padY, padX, padZ], 'constant')
     imgR = ndimage.rotate(imgP, angle, reshape=False)
-    return imgR[padY[0] : -padY[1], padX[0] : -padX[1]]
+    return imgR[padX[0] : -padX[1],padY[0] : -padY[1]]
 
 
 
@@ -66,7 +67,9 @@ class pymakeplots:
         self.cliplevel=None
         self.fits=False
         self.pvdthick=5.    
-    
+        self.flipped=False
+        self.make_square=True
+        
     def vsystrans_inv(self,val):
         return val +self.vsys
 
@@ -81,7 +84,8 @@ class pymakeplots:
        self.pbcorr_cube = self.read_primary_cube(path_to_pbcorr_cube) 
        
        pb,hdr= self.read_in_a_cube(path_to_pb)
-       
+       if self.flipped: pb=np.flip(pb,axis=2)
+
        self.flat_cube = self.pbcorr_cube*pb
                           
     
@@ -90,6 +94,7 @@ class pymakeplots:
        self.flat_cube = self.read_primary_cube(path_to_flat_cube)
        
        pb,hdr= self.read_in_a_cube(path_to_pb)
+       if self.flipped: pb=np.flip(pb,axis=2)
        
        self.pbcorr_cube = self.flat_cube / pb
        
@@ -108,7 +113,7 @@ class pymakeplots:
        self.pbcorr_cube = self.read_primary_cube(path_to_pbcorr_cube) 
        
        self.flat_cube,hdr = self.read_in_a_cube(path_to_flat_cube)
-
+       if self.flipped: self.flat_cube=np.flip(self.flat_cube,axis=2)
            
     def smooth_mask(self):
         """
@@ -192,6 +197,7 @@ class pymakeplots:
         hdulist=fits.open(path)
         hdr=hdulist[0].header
         cube = np.squeeze(hdulist[0].data.T) #squeeze to remove singular stokes axis if present
+        cube[np.isfinite(cube) == False] = 0.0
         return cube, hdr
         
     def read_primary_cube(self,cube):
@@ -233,7 +239,7 @@ class pymakeplots:
             datacube = np.flip(datacube,axis=2)
             self.dv*=(-1)
             self.vcoord = np.flip(self.vcoord)
-
+            self.flipped=True
         datacube[~np.isfinite(datacube)]=0.0
         
         return datacube
@@ -252,7 +258,7 @@ class pymakeplots:
         
         if self.gal_distance == None:
             self.gal_distance = self.vsys/70.
-            print("Warning! Estimating galaxy distance using Hubble expansion. Set `gal_distance` if this is not appropriate.")
+            if not self.silent: print("Warning! Estimating galaxy distance using Hubble expansion. Set `gal_distance` if this is not appropriate.")
     
     def make_all(self,pdf=False,fits=False):
         self.set_rc_params()
@@ -261,7 +267,7 @@ class pymakeplots:
 
         gs0 = gridspec.GridSpec(2, 1, figure=fig)
         gs0.tight_layout(fig)
-        gs00 = gridspec.GridSpecFromSubplotSpec(1, 4, subplot_spec=gs0[0], wspace=0.0, hspace=0.0)
+        gs00 = gridspec.GridSpecFromSubplotSpec(1, 4, subplot_spec=gs0[0], wspace=0.0, hspace=1.3)
 
         ax1 = fig.add_subplot(gs00[0, 0])
         ax2 = fig.add_subplot(gs00[0,1], sharey=ax1)
@@ -270,20 +276,11 @@ class pymakeplots:
         textaxes.axis('off')
 
 
-        gs01 = gridspec.GridSpecFromSubplotSpec(1, 2, subplot_spec=gs0[1], wspace=0.3, hspace=0.0)
+        gs01 = gridspec.GridSpecFromSubplotSpec(1, 2, subplot_spec=gs0[1], wspace=0.3, hspace=1.3)
 
         ax4 = fig.add_subplot(gs01[0, 0])
         ax5 = fig.add_subplot(gs01[0, 1])
 
-
-
-
-        #inner_lower = gridspec.GridSpecFromSubplotSpec(1, 2,subplot_spec=outer[1])
-
-        #ax4 = plt.Subplot(fig, inner_lower[0])
-        #ax5 = plt.Subplot(fig, inner_lower[1])
-                #
-        # ax5 = fig.add_subplot(gs[1, -1])
         plt.tight_layout()
         plt.setp(ax2.get_yticklabels(), visible=False)
         plt.setp(ax3.get_yticklabels(), visible=False)
@@ -291,7 +288,7 @@ class pymakeplots:
 
 
 
-        #fig,axes=plt.subplots(2,3,figsize=(7*3,14))
+
         self.make_moments(axes=np.array([ax1,ax2,ax3]),fits=fits)
         self.make_pvd(axes=ax4,fits=fits)
         self.make_spec(axes=ax5,fits=fits)
@@ -303,13 +300,11 @@ class pymakeplots:
 
         c = ICRS(self.obj_ra*u.degree, self.obj_dec*u.degree)
 
-        # import ipdb
-        # ipdb.set_trace()
         thetext = (self.galname)+'\n \n'
         thetext += (("RA: "+c.ra.to_string(u.hour, sep=':')))+'\n'
         thetext += ("Dec: "+c.dec.to_string(u.degree, sep=':', alwayssign=True))+'\n \n'
         thetext += ("Vsys: "+str(int(self.vsys))+" km/s")+'\n'
-        thetext += ("Dist: "+str(int(self.gal_distance))+" Mpc")+'\n'
+        thetext += ("Dist: "+str(round(self.gal_distance,1))+" Mpc")+'\n'
         if self.gal_distance == self.vsys/70.:
             thetext+=("(Est. from Vsys)")
 
@@ -329,61 +324,7 @@ class pymakeplots:
             plt.show()
 
     
-    # def make_all(self,pdf=False,fits=False):
-    #     self.set_rc_params()
-    #
-    #     fig = plt.figure(constrained_layout=True,figsize=(7*3,14))
-    #     gs = fig.add_gridspec(2, 4)
-    #     ax1 = fig.add_subplot(gs[0, 0])
-    #     ax2 = fig.add_subplot(gs[0, 1], sharey=ax1)
-    #     ax3 = fig.add_subplot(gs[0, 2], sharey=ax1)
-    #     ax4 = fig.add_subplot(gs[1,0:-1])
-    #     ax5 = fig.add_subplot(gs[1, -1])
-    #     textaxes = fig.add_subplot(gs[0, -1])
-    #     textaxes.axis('off')
-    #
-    #
-    #     plt.setp(ax2.get_yticklabels(), visible=False)
-    #     plt.setp(ax3.get_yticklabels(), visible=False)
-    #     gs.tight_layout(fig, rect=[0, 0, 1, 0.97])
-    #
-    #
-    #
-    #     # fig,axes=plt.subplots(2,3,figsize=(7*3,14))
-    #     self.make_moments(axes=np.array([ax1,ax2,ax3]),fits=fits)
-    #     self.make_pvd(axes=ax4,fits=fits)
-    #     ax4.set_title(self.galname)
-    #     self.make_spec(axes=ax5,fits=fits)
-    #
-    #
-    #     ###### make summary box
-    #
-    #
-    #     c = ICRS(self.obj_ra*u.degree, self.obj_dec*u.degree)
-    #
-    #     thetext = self.galname
-    #     thetext += "\n \nRA: "+c.ra.to_string(u.hour, sep=':')
-    #     thetext += "\nDec: "+c.dec.to_string(u.degree, sep=':', alwayssign=True)
-    #     thetext += "\n \nVsys: "+str(int(self.vsys))+" km s$^{-1}$"
-    #     thetext += "\nDist: "+str(int(self.gal_distance))+" Mpc"
-    #     if self.gal_distance == self.vsys/70.:
-    #         thetext+="\n(Estimated from Vsys)"
-    #
-    #
-    #
-    #     at2 = AnchoredText(thetext,
-    #                        loc='upper right', prop=dict(size=30), frameon=False,
-    #                        bbox_transform=textaxes.transAxes
-    #                        )
-    #     textaxes.add_artist(at2)
-    #
-    #
-    #
-    #     if pdf:
-    #         plt.savefig(self.galname+"_allplots.pdf", bbox_inches = 'tight')
-    #     else:
-    #         plt.show()
-            
+  
     
     def make_moments(self,axes=None,mom=[0,1,2],pdf=False,fits=False):
         mom=np.array(mom)
@@ -423,24 +364,6 @@ class pymakeplots:
         else:
             if not outsideaxis: plt.show()
         
-    # def scalebar_old(self,ax):
-    #     barlength_pc = np.ceil((np.abs(self.xc[-1]-self.xc[0])*4.84*self.gal_distance)/1000.)*100
-    #     barlength_arc=  barlength_pc/(4.84*self.gal_distance)
-    #
-    #     barcen=[self.xc[-1] - (barlength_arc)*1.0 , self.yc[0] + (barlength_arc)*0.5]
-    #
-    #     ax.add_patch(Rectangle((barcen[0]-((barlength_arc/2) + barlength_arc*0.2),self.yc[0] + (barlength_arc)*0.45), barlength_arc+ barlength_arc*0.4, (barlength_arc)*0.5,
-    #                  edgecolor='none',
-    #                  facecolor='white',
-    #                  linewidth=1.5))
-    #
-    #     if np.log10(barlength_pc) > 3:
-    #         ax.annotate((barlength_pc/1e3).astype(np.str)+ " kpc",xy=(barcen[0],barcen[1]+(self.yc[1]-self.yc[0])),c='k', ha='center',size=18)
-    #     else:
-    #         ax.annotate(barlength_pc.astype(np.int).astype(np.str)+ " pc",xy=(barcen[0],barcen[1]+(self.yc[1]-self.yc[0])),c='k', ha='center',size=18)
-    #
-    #     ax.plot([barcen[0]-barlength_arc/2.,barcen[0]+barlength_arc/2.],[barcen[1],barcen[1]],'k')
-    #
     
     def scalebar(self,ax,loc='lower right'):
         barlength_pc = np.ceil((np.abs(self.xc[-1]-self.xc[0])*4.84*self.gal_distance)/1000.)*100
@@ -472,17 +395,16 @@ class pymakeplots:
         
         if self.chans2do == None:
             # use the mask to try and guess the channels with signal.
-            mask_cumsum=np.cumsum(self.mask.sum(axis=0).sum(axis=0))
+            mask_cumsum=np.nancumsum(self.mask.sum(axis=0).sum(axis=0))
             w_low,=np.where(mask_cumsum/np.max(mask_cumsum) < 0.02)
             w_high,=np.where(mask_cumsum/np.max(mask_cumsum) > 0.98)
             
-            if w_low==[]: w_low=np.array([0])
-            if w_high==[]: w_high=np.array([self.vcoord.size])
-
+            if w_low.size ==0: w_low=np.array([0])
+            if w_high.size ==0: w_high=np.array([self.vcoord.size])
             self.chans2do=[np.clip(np.max(w_low)-2,0,self.vcoord.size),np.clip(np.min(w_high)+2,0,self.vcoord.size)]
     
         if self.vsys == None:
-            # use the cubeto try and guess the vsys
+            # use the cube to try and guess the vsys
             self.vsys=((self.pbcorr_cube*self.mask).sum(axis=0).sum(axis=0)*self.vcoord).sum()/((self.pbcorr_cube*self.mask).sum(axis=0).sum(axis=0)).sum()
         
         if self.imagesize != None:
@@ -498,21 +420,25 @@ class pymakeplots:
             mom0=(self.mask).sum(axis=2)
             mom0[mom0>0]=1
             
-            cumulative_x = np.cumsum(mom0.sum(axis=1),dtype=np.float)
-            cumulative_x /= np.max(cumulative_x)
-            cumulative_y = np.cumsum(mom0.sum(axis=0),dtype=np.float)
-            cumulative_y /= np.max(cumulative_y)
+            cumulative_x = np.nancumsum(mom0.sum(axis=1),dtype=np.float)
+            cumulative_x /= np.nanmax(cumulative_x)
+            cumulative_y = np.nancumsum(mom0.sum(axis=0),dtype=np.float)
+            cumulative_y /= np.nanmax(cumulative_y)
             
             wx_low,=np.where(cumulative_x < 0.02)
+            if wx_low.size ==0: wx_low=np.array([0])
             wx_high,=np.where(cumulative_x > 0.98)
-            
+            if wx_high.size ==0: wx_high=np.array([cumulative_x.size])
             wy_low,=np.where(cumulative_y < 0.02)
+            if wy_low.size ==0: wy_low=np.array([0])
             wy_high,=np.where(cumulative_y > 0.98)
+            if wy_high.size ==0: wy_high=np.array([cumulative_y.size])
+            
 
             
             beam_in_pix = np.int(np.ceil(self.bmaj/self.cellsize))
             
-            
+
             self.spatial_trim = [np.clip(np.max(wx_low) - 2*beam_in_pix,0,self.xcoord.size),np.clip(np.min(wx_high) + 2*beam_in_pix,0,self.xcoord.size)\
                                 , np.clip(np.max(wy_low) - 2*beam_in_pix,0,self.ycoord.size), np.clip(np.min(wy_high) + 2*beam_in_pix,0,self.ycoord.size)]
             
@@ -525,7 +451,7 @@ class pymakeplots:
         self.ycoord_trim=self.ycoord[self.spatial_trim[2]:self.spatial_trim[3]]
         self.vcoord_trim=self.vcoord[self.chans2do[0]:self.chans2do[1]]  
             
-            #self.spatial_trim
+           
             
     
 
@@ -539,22 +465,8 @@ class pymakeplots:
         cax.xaxis.set_label_position('top')
         return cb         
             
-    #
-    
-    # def add_beam_old(self,ax):
-    #     beampos=(self.xc[0] + (self.bmaj)*1.5, self.yc[0] + (self.bmaj)*1.5)
-    #
-    #     ax.add_patch(Ellipse(beampos, width=self.bmaj, height=self.bmin, angle=self.bpa,
-    #                  edgecolor='black',
-    #                  facecolor='none',
-    #                  linewidth=1.5))
         
-        
-    def add_beam(self,ax):
-        """
-        Draw an ellipse of width=0.1, height=0.15 in data coordinates
-        """
-        
+    def add_beam(self,ax):    
         ae = AnchoredEllipse(ax.transData, width=self.bmaj, height=self.bmin, angle=self.bpa,
                              loc='lower left', pad=0.5, borderpad=0.4,
                              frameon=False)                   
@@ -592,8 +504,9 @@ class pymakeplots:
             
             
         self.add_beam(ax1)
-
-        
+        if self.make_square:
+            ax1.set_xlim(np.min([self.xc[0],self.yc[0]]),np.max([self.xc[-1],self.yc[-1]]))
+            ax1.set_ylim(np.min([self.xc[0],self.yc[0]]),np.max([self.xc[-1],self.yc[-1]]))
         ax1.set_aspect('equal')
         
         if self.fits:
@@ -620,7 +533,9 @@ class pymakeplots:
         self.add_beam(ax1)
         
         ax1.set_aspect('equal')
-        
+        if self.make_square:
+            ax1.set_xlim(np.min([self.xc[0],self.yc[0]]),np.max([self.xc[-1],self.yc[-1]]))
+            ax1.set_ylim(np.min([self.xc[0],self.yc[0]]),np.max([self.xc[-1],self.yc[-1]]))
         if self.fits:
             self.write_fits(mom1.T,1)
 
@@ -662,9 +577,10 @@ class pymakeplots:
         
         self.add_beam(ax1)
         
-        # fig.colorbar(im1, ax=ax1,ticks=
         ax1.set_aspect('equal')
-        
+        if self.make_square:
+            ax1.set_xlim(np.min([self.xc[0],self.yc[0]]),np.max([self.xc[-1],self.yc[-1]]))
+            ax1.set_ylim(np.min([self.xc[0],self.yc[0]]),np.max([self.xc[-1],self.yc[-1]]))
         if self.fits:
             self.write_fits(mom2.T,2)
       
@@ -749,15 +665,15 @@ class pymakeplots:
         centpix_x=np.where(np.isclose(self.xc,0.0,atol=self.cellsize/2.))[0]
         centpix_y=np.where(np.isclose(self.yc,0.0,atol=self.cellsize/2.))[0]
         
-        rotcube= rotateImage(self.pbcorr_cube_trim*self.mask_trim,180-self.posang,[centpix_x[0],centpix_y[0]])
+        rotcube= rotateImage(self.pbcorr_cube_trim*self.mask_trim,90-self.posang,[centpix_x[0],centpix_y[0]])
+
+
+        pvd=rotcube[:,np.array(rotcube.shape[1]//2-self.pvdthick).astype(np.int):np.array(rotcube.shape[1]//2+self.pvdthick).astype(np.int),:].sum(axis=1)
+        
 
         
-        pvd=rotcube[np.array(rotcube.shape[1]//2-self.pvdthick).astype(np.int):np.array(rotcube.shape[1]//2+self.pvdthick).astype(np.int),:,:].sum(axis=0)
-        
-
-        
-        xx = self.yc * np.cos(np.deg2rad(self.posang)) #- self.yc * np.sin(np.deg2rad(self.posang))
-        yy = self.yc * np.sin(np.deg2rad(self.posang)) #+ self.yc * np.cos(np.deg2rad(self.posang))
+        xx = self.yc * np.cos(np.deg2rad(self.posang)) 
+        yy = self.yc * np.sin(np.deg2rad(self.posang))
         
         if self.posang > 180:
             loc1="upper left"
@@ -767,13 +683,11 @@ class pymakeplots:
             loc2="lower left"
 
         pvdaxis=(-1)*np.sign(self.yc)*np.sqrt(xx*xx + yy*yy)
-        # import ipdb
-        # ipdb.set_trace()
-        
-        
-        # pvdaxis=self.xc*np.sin(np.deg2rad(self.posang)) + self.yc*np.cos(np.deg2rad(self.posang))
+
         oldcmp = cm.get_cmap("YlOrBr", 512)
         newcmp = ListedColormap(oldcmp(np.linspace(0.15, 1, 256)))
+        
+
         
         axes.contourf(pvdaxis,self.vcoord_trim,pvd.T,levels=np.linspace(self.cliplevel,np.nanmax(pvd),10),cmap=newcmp)
         axes.contour(pvdaxis,self.vcoord_trim,pvd.T,levels=np.linspace(self.cliplevel,np.nanmax(pvd),10),colors='black')
@@ -812,6 +726,7 @@ class pymakeplots:
             outsideaxis=1
         spec=self.pbcorr_cube[self.spatial_trim[0]:self.spatial_trim[1],self.spatial_trim[2]:self.spatial_trim[3],:].sum(axis=0).sum(axis=0)
         spec_mask=(self.pbcorr_cube_trim*self.mask_trim).sum(axis=0).sum(axis=0)
+    
         
         if self.bunit == "Jy/beam":
             
@@ -825,7 +740,7 @@ class pymakeplots:
             else:
                 ylab="Flux Density (Jy)"
         if self.bunit == "K":
-            ylab="Tempearture (K)"
+            ylab="Brightness Temp. (K)"
             
             
         
@@ -842,6 +757,9 @@ class pymakeplots:
         secax = axes.secondary_xaxis('top', functions=(self.vsystrans, self.vsystrans_inv))
         secax.set_xlabel(r'V$_{\rm offset}$ (km s$^{-1}$)')
         
+        if self.fits:
+            self.write_spectrum(self.vcoord,spec,self.vcoord_trim,spec_mask,ylab)
+        
         if pdf:
             plt.savefig(self.galname+"_spec.pdf", bbox_inches = 'tight')
         else:
@@ -849,4 +767,19 @@ class pymakeplots:
         
             
         
-            
+    def write_spectrum(self,v1,spec1,vmask,specmask,descrip):
+       if self.fits == True:
+           filename=self.galname
+       else:
+           filename=self.fits
+       
+       
+       t = Table([v1,spec1],names=('Velocity (km/s)', descrip))   
+       t.write(filename+"_spec.csv", format='csv',overwrite=True)
+       
+       t1 = Table([vmask,specmask],names=('Velocity (km/s)', descrip))   
+       t1.write(filename+"_specmask.csv", format='csv',overwrite=True)
+       
+       
+    
+           
