@@ -1,4 +1,4 @@
-[![Python 3.8](https://img.shields.io/badge/python-3.8-blue.svg)](https://www.python.org/downloads/release/python-382/) [![PyPI version](https://badge.fury.io/py/kinms.svg)](https://badge.fury.io/py/pymakeplots) 
+[![Python 3.8](https://img.shields.io/badge/python-3.8-blue.svg)](https://www.python.org/downloads/release/python-382/) [![PyPI version](https://badge.fury.io/py/pymakeplots.svg)](https://badge.fury.io/py/pymakeplots) 
 
 A python module for making publication quality plots and output datafiles (including moment zero, one, two, PVD's and spectra) from interferometric datacubes. 
 
