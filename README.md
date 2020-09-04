@@ -7,12 +7,13 @@ A python module for making publication quality plots and output datafiles (inclu
 
 You can install pymakeplots with `pip install pymakeplots`. Alternatively you can download the code, navigate to the directory you unpack it too, and run `python setup.py install`.
     
-It requires the following modules:
+It requires the following modules (which pip should install for you if required):
 
 * numpy
 * matplotlib
 * scipy
 * astropy
+* pafit
 
 
 ### Documentation

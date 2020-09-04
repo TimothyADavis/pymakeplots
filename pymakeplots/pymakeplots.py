@@ -2,10 +2,8 @@
 import numpy as np
 import scipy.interpolate as interpolate
 from astropy.io import fits
-#from stackarator.dist_ellipse import dist_ellipse
 import astropy.units as u
 from scipy import ndimage
-# from tqdm import tqdm
 import matplotlib.pyplot as plt
 import matplotlib
 from pymakeplots.sauron_colormap import sauron
@@ -18,6 +16,7 @@ from mpl_toolkits.axes_grid1.anchored_artists import AnchoredEllipse,AnchoredSiz
 from astropy.coordinates import ICRS
 import matplotlib.gridspec as gridspec
 from astropy.table import Table
+from pafit.fit_kinematic_pa import fit_kinematic_pa
 
 def rotateImage(img, angle, pivot):
     padX = [img.shape[0] - pivot[0], pivot[0]]
@@ -30,10 +29,10 @@ def rotateImage(img, angle, pivot):
 
 
 class pymakeplots:
-    def __init__(self):
+    def __init__(self,cube_flat=None,pb=None,cube=None):
         self.galname=None
         self.gal_distance=None
-        self.posang=0
+        self.posang=None
         self.vsys=None
         self.moment1=None
         self.rms=None
@@ -69,7 +68,25 @@ class pymakeplots:
         self.pvdthick=5.    
         self.flipped=False
         self.make_square=True
+        self.useallpixels = False
         
+        if (cube != None)&(pb==None)&(cube_flat==None):
+            # only one cube given
+            self.input_cube_nopb(cube)
+            
+        if (cube != None)&(pb!=None):
+            # pbcorred cube and pb given
+            self.input_cube_pbcorr(cube,pb)
+        
+        if (cube_flat != None)&(pb!=None):
+            # flat cube and pb given
+            if np.any(self.pbcorr_cube) == None: #check if the user gave all three cubes, in which case this call is redundant
+                self.input_cube_flat(cube_flat,pb)  
+              
+        if (cube != None)&(pb==None)&(cube_flat!=None):
+            # pbcorred cube and flat cube given
+            self.input_cube_pbcorr_and_flat(cube,cube_flat)        
+            
     def vsystrans_inv(self,val):
         return val +self.vsys
 
@@ -292,6 +309,16 @@ class pymakeplots:
         self.make_moments(axes=np.array([ax1,ax2,ax3]),fits=fits)
         self.make_pvd(axes=ax4,fits=fits)
         self.make_spec(axes=ax5,fits=fits)
+        
+        ### plotting PA on mom1
+        ypv=self.yc
+        xpv=self.yc*0.0
+        ang=self.posang
+        c = np.cos(np.deg2rad(ang))
+        s = np.sin(np.deg2rad(ang))
+        x2 =  c*xpv - s*ypv
+        y2 =  s*xpv + c*ypv
+        ax2.plot(x2,y2,'k--')
 
 
         ###### make summary box
@@ -538,6 +565,7 @@ class pymakeplots:
             ax1.set_ylim(np.min([self.xc[0],self.yc[0]]),np.max([self.xc[-1],self.yc[-1]]))
         if self.fits:
             self.write_fits(mom1.T,1)
+                
 
         
     def mom2(self,ax1,first=True):
@@ -661,6 +689,50 @@ class pymakeplots:
             outsideaxis=0
         else:
             outsideaxis=1
+            
+
+        if self.posang==None:
+            # try fitting the moment one to get the kinematic pa
+            if not self.silent: print("No position angle given, estimating using the observed moment one.")
+            mom0=(self.pbcorr_cube_trim*self.mask_trim).sum(axis=2)
+            mom1=mom0.copy()*np.nan
+            mom1[mom0 != 0.0] = (((self.pbcorr_cube_trim*self.mask_trim)*self.vcoord_trim).sum(axis=2))[mom0 != 0.0]/mom0[mom0 != 0.0]
+            mom1=mom1.T
+            
+
+            # if the cube is small, use it directly to estimate posang. If its large, then interpolate down to keep runtime low.
+            if (self.pbcorr_cube_trim[:,:,0].size < 50*50) or (self.useallpixels):
+                xv, yv = np.meshgrid(self.xc,self.yc)
+                x,y,v = xv[np.isfinite(mom1)],yv[np.isfinite(mom1)],mom1[np.isfinite(mom1)]
+            else:
+                print("Downsampling the observed moment one in PA estimate for speed. Set `useallpixels` to override.")    
+                mom1[np.isfinite(mom1) == False] = self.vsys
+                interper = interpolate.interp2d(self.xc,self.yc,mom1-self.vsys,bounds_error=False,fill_value=np.nan)
+                x=np.linspace(np.min(self.xc),np.max(self.xc),50)
+                y=np.linspace(np.min(self.yc),np.max(self.yc),50)
+                v= interper(x,y)
+                xv, yv = np.meshgrid(x,y)
+                x,y,v = xv.flatten(),yv.flatten(),v.flatten()
+                
+            self.posang,_,_ = fit_kinematic_pa(x[np.isfinite(v)],y[np.isfinite(v)],v[np.isfinite(v)],nsteps=36,plot=False,quiet=True)
+            
+            if np.sin(np.deg2rad((self.posang+45)*2)) > 0:
+                # do y axis cut
+                if np.nanmean(mom1[self.yc > 0,:]) > np.nanmean(mom1[self.yc < 0,:]):
+                    # posang should be gt 180
+                    if self.posang < 180: self.posang += 180
+                else:
+                     # posang should be lt 180
+                    if self.posang > 180: self.posang -= 180    
+            else:
+                # do x axis cut
+                if np.nanmean(mom1[:,self.xc > 0]) > np.nanmean(mom1[:,self.xc < 0]):
+                    # posang should be gt 180
+                    if self.posang < 180: self.posang += 180
+                else:
+                     # posang should be lt 180
+                    if self.posang > 180: self.posang -= 180
+            if not self.silent: print("PA estimate (degrees): ",np.round(self.posang,1))        
                 
         centpix_x=np.where(np.isclose(self.xc,0.0,atol=self.cellsize/2.))[0]
         centpix_y=np.where(np.isclose(self.yc,0.0,atol=self.cellsize/2.))[0]
@@ -700,7 +772,7 @@ class pymakeplots:
         
         
 
-        anchored_text = AnchoredText("PA: "+"".join(np.array([self.posang]).astype(np.str))+"$^{\circ}$", loc=loc1,frameon=False)
+        anchored_text = AnchoredText("PA: "+str(round(self.posang,1))+"$^{\circ}$", loc=loc1,frameon=False)
         axes.add_artist(anchored_text)
         
         if self.gal_distance != None:
@@ -728,7 +800,7 @@ class pymakeplots:
         spec_mask=(self.pbcorr_cube_trim*self.mask_trim).sum(axis=0).sum(axis=0)
     
         
-        if self.bunit == "Jy/beam":
+        if self.bunit.lower() == "Jy/beam".lower():
             
             spec*=1/self.beam_area()
             spec_mask*=1/self.beam_area()
