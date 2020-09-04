@@ -18,7 +18,7 @@ It requires the following modules (which pip should install for you if required)
 
 ### Documentation
 
-Coming soon.
+Check the quick start/tutorial jupyter notebook [here](https://github.com/TimothyADavis/pymakeplots/blob/master/pymakeplots/quickstart/pymakeplots_tutorial.ipynb)
 
 
 ### Commumication
