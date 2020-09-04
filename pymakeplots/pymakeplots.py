@@ -24,8 +24,11 @@ def rotateImage(img, angle, pivot):
     padZ = [0,0]
     imgP = np.pad(img, [padY, padX, padZ], 'constant')
     imgR = ndimage.rotate(imgP, angle, reshape=False)
-    return imgR[padX[0] : -padX[1],padY[0] : -padY[1]]
+    #import ipdb
+    #ipdb.set_trace()
+    #return imgR[padX[0] : -padX[1],padY[0] : -padY[1]]
 
+    return imgR#[imgR[:,:,:].sum(axis=2).sum(axis=1) > 0,imgR[:,:,:].sum(axis=2).sum(axis=0) > 0,:]
 
 
 class pymakeplots:
@@ -51,7 +54,6 @@ class pymakeplots:
         self.cellsize=None
         self.silent=False # rig for silent running if true
         self.bardist=None
-        self.hdr=None
         self.rmsfac=3
         self.obj_ra=None
         self.obj_dec=None
@@ -59,7 +61,8 @@ class pymakeplots:
         self.xc=None
         self.yc=None
         self.bunit=None
-        self.ignore_firstlast_chans=5
+        self.linefree_chans_start, self.linefree_chans_end = 1, 6
+        self.ignore_firstlast_chans= 0
         self.chans2do=None
         self.spatial_trim = None
         self.maxvdisp=None
@@ -163,14 +166,22 @@ class pymakeplots:
            cd3=hdr['CD3_3']
            
                
-       if hdr['CTYPE3'] =='VRAD':     
+       if (hdr['CTYPE3'] =='VRAD') or (hdr['CTYPE3'] =='VELO-LSR'):     
            v1=((np.arange(0,hdr['NAXIS3'])-(hdr['CRPIX3']-1))*cd3) + hdr['CRVAL3']
-           if hdr['CUNIT3']=='m/s':
-                v1/=1e3
-                cd3/=1e3        
+           try:
+               if hdr['CUNIT3']=='m/s':
+                    v1/=1e3
+                    cd3/=1e3
+           except:
+                if np.max(v1) > 1e5:
+                    v1/=1e3
+                    cd3/=1e3        
        else:
            f1=(((np.arange(0,hdr['NAXIS3'])-(hdr['CRPIX3']-1))*cd3) + hdr['CRVAL3'])*u.Hz
-           restfreq = hdr['RESTFRQ']*u.Hz
+           try:
+               restfreq = hdr['RESTFRQ']*u.Hz
+           except:
+               restfreq = hdr['RESTFREQ']*u.Hz  
            v1=f1.to(u.km/u.s, equivalencies=u.doppler_radio(restfreq))
            v1=v1.value
            cd3= v1[1]-v1[0]
@@ -206,7 +217,7 @@ class pymakeplots:
     def rms_estimate(self,cube):
         quarterx=np.array(self.xcoord.size/4.).astype(np.int)
         quartery=np.array(self.ycoord.size/4.).astype(np.int)
-        return np.nanstd(cube[quarterx*1:3*quarterx,1*quartery:3*quartery,self.ignore_firstlast_chans+2:self.ignore_firstlast_chans+5])
+        return np.nanstd(cube[quarterx*1:3*quarterx,1*quartery:3*quartery,self.linefree_chans_start:self.linefree_chans_end])
         
                     
         
@@ -246,9 +257,15 @@ class pymakeplots:
         try:
             self.obj_ra=hdr['OBSRA']
             self.obj_dec=hdr['OBSDEC']
+            if (self.obj_ra > np.max(self.xcoord)) or (self.obj_ra < np.min(self.xcoord)) or (self.obj_dec < np.min(self.ycoord)) or (self.obj_dec > np.max(self.ycoord)):
+                # obsra/dec given in the headers arent in the observed field! Fall back on medians.
+                if not self.silent: print("OBSRA/OBSDEC keywords dont seem correct! Assuming galaxy centre is at pointing centre")
+                self.obj_ra=np.median(self.xcoord)
+                self.obj_dec=np.median(self.ycoord)
         except:
             self.obj_ra=np.median(self.xcoord)
             self.obj_dec=np.median(self.ycoord)
+        
             
             
         
@@ -524,9 +541,9 @@ class pymakeplots:
         
         cb=self.colorbar(im1,ticks=vticks)
         
-        if self.bunit == "Jy/beam":
+        if self.bunit.lower() == "Jy/beam".lower():
             cb.set_label("Integrated Intensity (Jy beam$^{-1}$ km s$^{-1}$)")
-        if self.bunit == "K":
+        if self.bunit.lower() == "K".lower():
             cb.set_label("Integrated Intensity (K km s$^{-1}$)")
             
             
@@ -734,18 +751,23 @@ class pymakeplots:
                     if self.posang > 180: self.posang -= 180
             if not self.silent: print("PA estimate (degrees): ",np.round(self.posang,1))        
                 
-        centpix_x=np.where(np.isclose(self.xc,0.0,atol=self.cellsize/2.))[0]
-        centpix_y=np.where(np.isclose(self.yc,0.0,atol=self.cellsize/2.))[0]
+        centpix_x=np.where(np.isclose(self.xc,0.0,atol=self.cellsize/1.9))[0]
+        centpix_y=np.where(np.isclose(self.yc,0.0,atol=self.cellsize/1.9))[0]
         
-        rotcube= rotateImage(self.pbcorr_cube_trim*self.mask_trim,90-self.posang,[centpix_x[0],centpix_y[0]])
+        
+        pbcube=self.pbcorr_cube[self.spatial_trim[0]:self.spatial_trim[1],self.spatial_trim[2]:self.spatial_trim[3],np.clip(self.chans2do[0]-5,0,self.mask.shape[2]):np.clip(self.chans2do[1]+5,0,self.mask.shape[2])]
+        
+        maskcube=self.mask[self.spatial_trim[0]:self.spatial_trim[1],self.spatial_trim[2]:self.spatial_trim[3],np.clip(self.chans2do[0]-5,0,self.mask.shape[2]):np.clip(self.chans2do[1]+5,0,self.mask.shape[2])]
+        
+        rotcube= rotateImage(pbcube*maskcube,90-self.posang,[centpix_x[0],centpix_y[0]])
 
 
         pvd=rotcube[:,np.array(rotcube.shape[1]//2-self.pvdthick).astype(np.int):np.array(rotcube.shape[1]//2+self.pvdthick).astype(np.int),:].sum(axis=1)
         
 
         
-        xx = self.yc * np.cos(np.deg2rad(self.posang)) 
-        yy = self.yc * np.sin(np.deg2rad(self.posang))
+        # xx = self.yc * np.cos(np.deg2rad(self.posang))
+        # yy = self.yc * np.sin(np.deg2rad(self.posang))
         
         if self.posang > 180:
             loc1="upper left"
@@ -754,15 +776,24 @@ class pymakeplots:
             loc1="upper right"
             loc2="lower left"
 
-        pvdaxis=(-1)*np.sign(self.yc)*np.sqrt(xx*xx + yy*yy)
-
+        pvdaxis=(np.arange(0,pvd.shape[0])-pvd.shape[0]/2)*self.cellsize#(-1)*np.sign(self.yc)*np.sqrt(xx*xx + yy*yy)
+        vaxis=self.vcoord[np.clip(self.chans2do[0]-5,0,self.mask.shape[2]):np.clip(self.chans2do[1]+5,0,self.mask.shape[2])]
+        
+        # import ipdb
+        # ipdb.set_trace()
+        pvd=pvd[np.abs(pvdaxis) < np.max([np.max(abs(self.xc)),np.max(abs(self.yc))])*np.sqrt(2),:]
+        pvdaxis=pvdaxis[np.abs(pvdaxis) < np.max([np.max(abs(self.xc)),np.max(abs(self.yc))])*np.sqrt(2)]
+        
+        #pvdaxis=pvdaxis[np.sum(pvd,axis=1) > 0]
+        #pvd=pvd[np.sum(pvd,axis=1) > 0,:]
+        
         oldcmp = cm.get_cmap("YlOrBr", 512)
         newcmp = ListedColormap(oldcmp(np.linspace(0.15, 1, 256)))
         
 
         
-        axes.contourf(pvdaxis,self.vcoord_trim,pvd.T,levels=np.linspace(self.cliplevel,np.nanmax(pvd),10),cmap=newcmp)
-        axes.contour(pvdaxis,self.vcoord_trim,pvd.T,levels=np.linspace(self.cliplevel,np.nanmax(pvd),10),colors='black')
+        axes.contourf(pvdaxis,vaxis,pvd.T,levels=np.linspace(self.cliplevel,np.nanmax(pvd),10),cmap=newcmp)
+        axes.contour(pvdaxis,vaxis,pvd.T,levels=np.linspace(self.cliplevel,np.nanmax(pvd),10),colors='black')
         
         axes.set_xlabel('Offset (")')
         axes.set_ylabel('Velocity (km s$^{-1}$)')
@@ -779,7 +810,7 @@ class pymakeplots:
             self.scalebar(axes,loc=loc2)
         
         if self.fits:
-            self.write_pvd_fits(pvdaxis,self.vcoord_trim,pvd.T)
+            self.write_pvd_fits(pvdaxis,vaxis,pvd.T)
         
         if pdf:
             plt.savefig(self.galname+"_pvd.pdf", bbox_inches = 'tight')
