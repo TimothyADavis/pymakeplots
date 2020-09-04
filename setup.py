@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
  
 setup(name='pymakeplots',
-       version='0.0.4',
+       version='0.0.5',
        description='',
        url='https://github.com/TimothyADavis/pymakeplots',
        author='Timothy A. Davis',
@@ -16,7 +16,7 @@ setup(name='pymakeplots',
        packages=['pymakeplots'],
        install_requires=[
            'numpy',
-           'matplotlib',
+           'matplotlib>3.3.1',
            'scipy',
            'astropy',
            'pafit',
