@@ -68,6 +68,7 @@ class pymakeplots:
         self.imagesize=None
         self.xc=None
         self.yc=None
+        self.all_axes_physical=False
         self.bunit=None
         self.linefree_chans_start, self.linefree_chans_end = 1, 6
         self.chans2do=None
@@ -168,6 +169,9 @@ class pymakeplots:
         newrms= self.rms_estimate(smooth_cube,0,1) 
         self.cliplevel=newrms*self.rmsfac   
         mask=(smooth_cube > self.cliplevel)
+        # print("Clip level:",((3e20*1.6014457E-20*91.9)/(self.bmaj*self.bmin))*self.cliplevel*self.dv)
+        # import ipdb
+        # ipdb.set_trace()
         return mask      
        
     def get_header_coord_arrays(self,hdr):
@@ -177,25 +181,29 @@ class pymakeplots:
 
         xp,yp=np.meshgrid(np.arange(0,maxsize),np.arange(0,maxsize))
         zp = xp.copy()
+        # import ipdb
+        # ipdb.set_trace()
+        # #coord = wcs.celestial.pixel_to_world(50, 50)
+        try:
+            x,y,spectral = self.wcs.all_pix2world(xp,yp,zp, 0)
+        except:
+            x,y,spectral,_ = self.wcs.all_pix2world(xp,yp,zp, 0,0) ## if stokes axis remains
 
-        x,y,spectral = self.wcs.all_pix2world(xp,yp,zp, 0)
-        
 
-
-        x1=np.median(x[0:hdr['NAXIS1'],0:hdr['NAXIS2']],0)
-        y1=np.median(y[0:hdr['NAXIS1'],0:hdr['NAXIS2']],1)
+        x1=np.median(x[0:hdr['NAXIS2'],0:hdr['NAXIS1']],0)
+        y1=np.median(y[0:hdr['NAXIS2'],0:hdr['NAXIS1']],1)
         spectral1=spectral[0,0:hdr['NAXIS3']]
 
-        if (hdr['CTYPE3'] =='VRAD') or (hdr['CTYPE3'] =='VELO-LSR'):
+        if (hdr['CTYPE3'] =='VRAD') or (hdr['CTYPE3'] =='VELO-LSR') or (hdr['CTYPE3'] =='VOPT'):
             v1=spectral1
             try:
                 if hdr['CUNIT3']=='m/s':
                      v1/=1e3
-                     cd3/=1e3
+                     #cd3/=1e3
             except:
                  if np.max(v1) > 1e5:
                      v1/=1e3
-                     cd3/=1e3
+                     #cd3/=1e3
 
         else:
            f1=spectral1*u.Hz
@@ -271,6 +279,7 @@ class pymakeplots:
         matplotlib.rcParams['ytick.direction'] = 'in'
         matplotlib.rcParams['xtick.bottom'] = True
         matplotlib.rcParams['ytick.left'] = True
+        #matplotlib.rcParams['ytick.right'] = True
         matplotlib.rcParams["xtick.minor.visible"] = True
         matplotlib.rcParams["ytick.minor.visible"] = True
         #params = {'mathtext.default': 'regular'}
@@ -311,7 +320,7 @@ class pymakeplots:
         except:     
            self.bmaj=hdr['BMAJ']*3600.
            self.bmin=hdr['BMIN']*3600.
-           self.bpa=hdr['BPA']*3600.
+           self.bpa=hdr['BPA']
         
 
            
@@ -364,9 +373,16 @@ class pymakeplots:
         self.xc=(self.xcoord_trim-self.obj_ra)*(-1) * 3600.
         self.yc=(self.ycoord_trim-self.obj_dec) * 3600. / np.cos(np.deg2rad(self.obj_dec))
         
+
         if self.gal_distance == None:
             self.gal_distance = self.vsys/70.
             if not self.silent: print("Warning! Estimating galaxy distance using Hubble expansion. Set `gal_distance` if this is not appropriate.")
+            
+        if self.all_axes_physical:
+            self.xc=self.ang2kpctrans(self.xc)
+            self.yc=self.ang2kpctrans(self.yc)
+
+            
     
     def make_all(self,pdf=False,fits=False):
         self.set_rc_params()
@@ -477,7 +493,7 @@ class pymakeplots:
                 self.mom2(axes[i],first=not i,last=(i==nplots-1))
 
         
-        if self.gal_distance != None:
+        if self.gal_distance != None and not self.all_axes_physical:
             self.scalebar(axes[i]) # plot onto last axes
 
                     
@@ -590,7 +606,12 @@ class pymakeplots:
             
         
     def add_beam(self,ax):    
-        ae = AnchoredEllipse(ax.transData, width=self.bmaj, height=self.bmin, angle=self.bpa,
+        if self.all_axes_physical:
+            ae = AnchoredEllipse(ax.transData, width=self.ang2kpctrans(self.bmaj), height=self.ang2kpctrans(self.bmin), angle=self.bpa,
+                             loc='lower left', pad=0.5, borderpad=0.4,
+                             frameon=False)
+        else:
+            ae = AnchoredEllipse(ax.transData, width=self.bmaj, height=self.bmin, angle=self.bpa,
                              loc='lower left', pad=0.5, borderpad=0.4,
                              frameon=False)                   
         ae.ellipse.set_edgecolor('black')
@@ -611,8 +632,12 @@ class pymakeplots:
 
         im1=ax1.contourf(self.xc,self.yc,mom0.T,levels=np.linspace(np.nanmin(mom0[mom0 > 0]),np.nanmax(mom0),10),cmap=newcmp)
         
-        ax1.set_xlabel('RA offset (")')
-        if first: ax1.set_ylabel('Dec offset (")')
+        if self.all_axes_physical:
+            ax1.set_xlabel('RA offset (kpc)')
+            if first: ax1.set_ylabel('Dec offset (kpc)')
+        else:
+            ax1.set_xlabel('RA offset (")')
+            if first: ax1.set_ylabel('Dec offset (")')
         
         
         maxmom0=np.nanmax(mom0)
@@ -634,7 +659,7 @@ class pymakeplots:
             ax1.set_ylim(np.min([self.xc[0],self.yc[0]]),np.max([self.xc[-1],self.yc[-1]]))
         ax1.set_aspect('equal')
         
-        if last:
+        if last and not self.all_axes_physical:
             if np.log10(self.ang2pctrans(np.max([self.xc,self.yc]))) > 3:
                 secax = ax1.secondary_yaxis('right', functions=(self.ang2kpctrans, self.ang2kpctrans_inv))
                 secax.set_ylabel(r'Dec offset (kpc)')
@@ -658,8 +683,12 @@ class pymakeplots:
         
         im1=ax1.contourf(self.xc,self.yc,mom1.T-self.vsys,levels=self.vcoord_trim-self.vsys,cmap=sauron,vmin=vticks[0],vmax=vticks[-1])
         
-        ax1.set_xlabel('RA offset (")')
-        if first: ax1.set_ylabel('Dec offset (")')
+        if self.all_axes_physical:
+            ax1.set_xlabel('RA offset (kpc)')
+            if first: ax1.set_ylabel('Dec offset (kpc)')
+        else:
+            ax1.set_xlabel('RA offset (")')
+            if first: ax1.set_ylabel('Dec offset (")')
         
                 
         cb=self.colorbar(im1,ticks=vticks)
@@ -671,7 +700,7 @@ class pymakeplots:
             ax1.set_xlim(np.min([self.xc[0],self.yc[0]]),np.max([self.xc[-1],self.yc[-1]]))
             ax1.set_ylim(np.min([self.xc[0],self.yc[0]]),np.max([self.xc[-1],self.yc[-1]]))
         
-        if last:
+        if last and not self.all_axes_physical:
             if np.log10(self.ang2pctrans(np.max([self.xc,self.yc]))) > 3:
                 secax = ax1.secondary_yaxis('right', functions=(self.ang2kpctrans, self.ang2kpctrans_inv))
                 secax.set_ylabel(r'Dec offset (kpc)')
@@ -703,8 +732,12 @@ class pymakeplots:
         
         im1=ax1.contourf(self.xc,self.yc,mom2.T,levels=mom2levs,cmap=sauron,vmax=self.maxvdisp)
         
-        ax1.set_xlabel('RA offset (")')
-        if first: ax1.set_ylabel('Dec offset (")')
+        if self.all_axes_physical:
+            ax1.set_xlabel('RA offset (kpc)')
+            if first: ax1.set_ylabel('Dec offset (kpc)')
+        else:
+            ax1.set_xlabel('RA offset (")')
+            if first: ax1.set_ylabel('Dec offset (")')
         
         if self.maxvdisp < 50:
             dvticks=10
@@ -726,7 +759,7 @@ class pymakeplots:
             ax1.set_xlim(np.min([self.xc[0],self.yc[0]]),np.max([self.xc[-1],self.yc[-1]]))
             ax1.set_ylim(np.min([self.xc[0],self.yc[0]]),np.max([self.xc[-1],self.yc[-1]]))
             
-        if last:
+        if last and not self.all_axes_physical:
             if np.log10(self.ang2pctrans(np.max([np.max(self.xc),np.max(self.yc)]))) > 3.3:
                 secax = ax1.secondary_yaxis('right', functions=(self.ang2kpctrans, self.ang2kpctrans_inv))
                 secax.set_ylabel(r'Dec offset (kpc)')
@@ -900,8 +933,12 @@ class pymakeplots:
         else:
             loc1="upper right"
             loc2="lower left"
-
-        pvdaxis=(np.arange(0,pvd.shape[0])-pvd.shape[0]/2)*self.cellsize
+        
+        pvdaxis=(np.arange(0,pvd.shape[0])-pvd.shape[0]/2)*self.cellsize    
+        if self.all_axes_physical:
+                pvdaxis=self.ang2kpctrans(pvdaxis)
+        
+            
         vaxis=self.vcoord_trim
         
 
@@ -918,7 +955,11 @@ class pymakeplots:
         axes.contourf(pvdaxis,vaxis,pvd.T,levels=np.linspace(self.cliplevel,np.nanmax(pvd),10),cmap=newcmp)
         axes.contour(pvdaxis,vaxis,pvd.T,levels=np.linspace(self.cliplevel,np.nanmax(pvd),10),colors='black')
         
-        axes.set_xlabel('Offset (")')
+        if self.all_axes_physical:
+             axes.set_xlabel('Offset (kpc)')
+        else:
+             axes.set_xlabel('Offset (")')
+       
         axes.set_ylabel('Velocity (km s$^{-1}$)')
         
         secax = axes.secondary_yaxis('right', functions=(self.vsystrans, self.vsystrans_inv))
@@ -929,7 +970,7 @@ class pymakeplots:
         anchored_text = AnchoredText("PA: "+str(round(self.posang,1))+"$^{\circ}$", loc=loc1,frameon=False)
         axes.add_artist(anchored_text)
         
-        if self.gal_distance != None:
+        if self.gal_distance != None and not self.all_axes_physical:
             self.scalebar(axes,loc=loc2)
         
         if self.fits:
@@ -993,7 +1034,8 @@ class pymakeplots:
         axes.axhline(y=0,linestyle='-.',color='k',alpha=0.5)        
         axes.set_xlabel('Velocity (km s$^{-1}$)')
         axes.set_ylabel(ylab)
-        
+        if np.log10(np.nanmedian(self.vcoord_trim)) >= 5:
+            plt.locator_params(axis='x', nbins=4)
 
 
             
