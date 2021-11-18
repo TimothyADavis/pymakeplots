@@ -215,7 +215,7 @@ class pymakeplots:
            v1=v1.value
 
         cd3= np.median(np.diff(v1))
-        cd1= np.median(np.diff(x1))
+        cd1= np.median(np.diff(y1))
         return x1,y1,v1,np.abs(cd1*3600),cd3
         
     # def get_header_coord_arrays(self,hdr,cube_or_mom):
@@ -982,6 +982,7 @@ class pymakeplots:
             if not outsideaxis: plt.show()
     
     def make_spec(self,axes=None,fits=False,pdf=False,onlydata=False,nsum=False,highlight=False):
+        self.fits=fits
         if np.any(self.xc) == None:
             self.prepare_cubes()
         
