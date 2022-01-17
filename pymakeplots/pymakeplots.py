@@ -80,7 +80,7 @@ class pymakeplots:
         self.flipped=False
         self.make_square=True
         self.useallpixels = False
-        self.wcs=None
+        #self.wcs=None
         
         if (cube != None)&(pb==None)&(cube_flat==None):
             # only one cube given
@@ -174,89 +174,89 @@ class pymakeplots:
         # ipdb.set_trace()
         return mask      
        
-    def get_header_coord_arrays(self,hdr):
-        self.wcs=wcs.WCS(hdr)
-
-        maxsize=np.max([hdr['NAXIS1'],hdr['NAXIS2'],hdr['NAXIS3']])
-
-        xp,yp=np.meshgrid(np.arange(0,maxsize),np.arange(0,maxsize))
-        zp = xp.copy()
-        # import ipdb
-        # ipdb.set_trace()
-        # #coord = wcs.celestial.pixel_to_world(50, 50)
-        try:
-            x,y,spectral = self.wcs.all_pix2world(xp,yp,zp, 0)
-        except:
-            x,y,spectral,_ = self.wcs.all_pix2world(xp,yp,zp, 0,0) ## if stokes axis remains
-
-
-        x1=np.median(x[0:hdr['NAXIS2'],0:hdr['NAXIS1']],0)
-        y1=np.median(y[0:hdr['NAXIS2'],0:hdr['NAXIS1']],1)
-        spectral1=spectral[0,0:hdr['NAXIS3']]
-
-        if (hdr['CTYPE3'] =='VRAD') or (hdr['CTYPE3'] =='VELO-LSR') or (hdr['CTYPE3'] =='VOPT'):
-            v1=spectral1
-            try:
-                if hdr['CUNIT3']=='m/s':
-                     v1/=1e3
-                     #cd3/=1e3
-            except:
-                 if np.max(v1) > 1e5:
-                     v1/=1e3
-                     #cd3/=1e3
-
-        else:
-           f1=spectral1*u.Hz
-           try:
-               self.restfreq = hdr['RESTFRQ']*u.Hz
-           except:
-               self.restfreq = hdr['RESTFREQ']*u.Hz
-           v1=f1.to(u.km/u.s, equivalencies=u.doppler_radio(self.restfreq))
-           v1=v1.value
-
-        cd3= np.median(np.diff(v1))
-        cd1= np.median(np.diff(y1))
-        return x1,y1,v1,np.abs(cd1*3600),cd3
-        
-    # def get_header_coord_arrays(self,hdr,cube_or_mom):
-    #    try:
-    #        cd1=hdr['CDELT1']
-    #        cd2=hdr['CDELT2']
+    # def get_header_coord_arrays(self,hdr):
+    #     self.wcs=wcs.WCS(hdr)
     #
-    #    except:
-    #        cd1=hdr['CD1_1']
-    #        cd2=hdr['CD2_2']
+    #     maxsize=np.max([hdr['NAXIS1'],hdr['NAXIS2'],hdr['NAXIS3']])
     #
-    #    x1=((np.arange(0,hdr['NAXIS1'])-(hdr['CRPIX1']-1))*cd1) + hdr['CRVAL1']
-    #    y1=((np.arange(0,hdr['NAXIS2'])-(hdr['CRPIX2']-1))*cd2) + hdr['CRVAL2']
+    #     xp,yp=np.meshgrid(np.arange(0,maxsize),np.arange(0,maxsize))
+    #     zp = xp.copy()
+    #     # import ipdb
+    #     # ipdb.set_trace()
+    #     # #coord = wcs.celestial.pixel_to_world(50, 50)
+    #     try:
+    #         x,y,spectral = self.wcs.all_pix2world(xp,yp,zp, 0)
+    #     except:
+    #         x,y,spectral,_ = self.wcs.all_pix2world(xp,yp,zp, 0,0) ## if stokes axis remains
     #
-    #    try:
-    #        cd3=hdr['CDELT3']
-    #    except:
-    #        cd3=hdr['CD3_3']
+    #     breakpoint()
+    #     x1=np.median(x[0:hdr['NAXIS2'],0:hdr['NAXIS1']],0)
+    #     y1=np.median(y[0:hdr['NAXIS2'],0:hdr['NAXIS1']],1)
+    #     spectral1=spectral[0,0:hdr['NAXIS3']]
     #
+    #     if (hdr['CTYPE3'] =='VRAD') or (hdr['CTYPE3'] =='VELO-LSR') or (hdr['CTYPE3'] =='VOPT'):
+    #         v1=spectral1
+    #         try:
+    #             if hdr['CUNIT3']=='m/s':
+    #                  v1/=1e3
+    #                  #cd3/=1e3
+    #         except:
+    #              if np.max(v1) > 1e5:
+    #                  v1/=1e3
+    #                  #cd3/=1e3
     #
-    #    if (hdr['CTYPE3'] =='VRAD') or (hdr['CTYPE3'] =='VELO-LSR'):
-    #        v1=((np.arange(0,hdr['NAXIS3'])-(hdr['CRPIX3']-1))*cd3) + hdr['CRVAL3']
+    #     else:
+    #        f1=spectral1*u.Hz
     #        try:
-    #            if hdr['CUNIT3']=='m/s':
-    #                 v1/=1e3
-    #                 cd3/=1e3
+    #            self.restfreq = hdr['RESTFRQ']*u.Hz
     #        except:
-    #             if np.max(v1) > 1e5:
-    #                 v1/=1e3
-    #                 cd3/=1e3
-    #    else:
-    #        f1=(((np.arange(0,hdr['NAXIS3'])-(hdr['CRPIX3']-1))*cd3) + hdr['CRVAL3'])*u.Hz
-    #        try:
-    #            restfreq = hdr['RESTFRQ']*u.Hz
-    #        except:
-    #            restfreq = hdr['RESTFREQ']*u.Hz
-    #        v1=f1.to(u.km/u.s, equivalencies=u.doppler_radio(restfreq))
+    #            self.restfreq = hdr['RESTFREQ']*u.Hz
+    #        v1=f1.to(u.km/u.s, equivalencies=u.doppler_radio(self.restfreq))
     #        v1=v1.value
-    #        cd3= v1[1]-v1[0]
     #
-    #    return x1,y1,v1,np.abs(cd1*3600),cd3
+    #     cd3= np.median(np.diff(v1))
+    #     cd1= np.median(np.diff(x1))
+    #     return x1,y1,v1,np.abs(cd1*3600),cd3
+        
+    def get_header_coord_arrays(self,hdr):
+       try:
+           cd1=hdr['CDELT1']
+           cd2=hdr['CDELT2']
+
+       except:
+           cd1=hdr['CD1_1']
+           cd2=hdr['CD2_2']
+
+       x1=((np.arange(0,hdr['NAXIS1'])-(hdr['CRPIX1']-1))*cd1) + hdr['CRVAL1']
+       y1=((np.arange(0,hdr['NAXIS2'])-(hdr['CRPIX2']-1))*cd2) + hdr['CRVAL2']
+
+       try:
+           cd3=hdr['CDELT3']
+       except:
+           cd3=hdr['CD3_3']
+
+
+       if (hdr['CTYPE3'] =='VRAD') or (hdr['CTYPE3'] =='VELO-LSR'):
+           v1=((np.arange(0,hdr['NAXIS3'])-(hdr['CRPIX3']-1))*cd3) + hdr['CRVAL3']
+           try:
+               if hdr['CUNIT3']=='m/s':
+                    v1/=1e3
+                    cd3/=1e3
+           except:
+                if np.max(v1) > 1e5:
+                    v1/=1e3
+                    cd3/=1e3
+       else:
+           f1=(((np.arange(0,hdr['NAXIS3'])-(hdr['CRPIX3']-1))*cd3) + hdr['CRVAL3'])*u.Hz
+           try:
+               restfreq = hdr['RESTFRQ']*u.Hz
+           except:
+               restfreq = hdr['RESTFREQ']*u.Hz
+           v1=f1.to(u.km/u.s, equivalencies=u.doppler_radio(restfreq))
+           v1=v1.value
+           cd3= v1[1]-v1[0]
+
+       return x1,y1,v1,np.abs(cd1*3600),cd3
            
 
     def set_rc_params(self,mult=1):
@@ -919,7 +919,7 @@ class pymakeplots:
         centpix_y=np.where(np.isclose(self.yc,0.0,atol=self.cellsize/1.9))[0]
         
 
-        
+
         rotcube= rotateImage(self.pbcorr_cube_trim*self.mask_trim,90-self.posang,[centpix_x[0],centpix_y[0]])
 
 
@@ -962,10 +962,11 @@ class pymakeplots:
        
         axes.set_ylabel('Velocity (km s$^{-1}$)')
         
+        secaxy = axes.secondary_xaxis('top', functions=(self.ang2kpctrans, self.ang2kpctrans_inv))
+        secaxy.set_xlabel('Offset (kpc)')
+        
         secax = axes.secondary_yaxis('right', functions=(self.vsystrans, self.vsystrans_inv))
         secax.set_ylabel(r'V$_{\rm offset}$ (km s$^{-1}$)')
-        
-        
 
         anchored_text = AnchoredText("PA: "+str(round(self.posang,1))+"$^{\circ}$", loc=loc1,frameon=False)
         axes.add_artist(anchored_text)
