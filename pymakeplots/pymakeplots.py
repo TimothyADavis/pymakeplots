@@ -226,7 +226,9 @@ class pymakeplots:
        except:
            cd1=hdr['CD1_1']
            cd2=hdr['CD2_2']
-
+       
+       cd1=(cd1/np.cos(np.deg2rad(hdr['CRVAL2'])))
+       
        x1=((np.arange(0,hdr['NAXIS1'])-(hdr['CRPIX1']-1))*cd1) + hdr['CRVAL1']
        y1=((np.arange(0,hdr['NAXIS2'])-(hdr['CRPIX2']-1))*cd2) + hdr['CRVAL2']
 
@@ -255,8 +257,8 @@ class pymakeplots:
            v1=f1.to(u.km/u.s, equivalencies=u.doppler_radio(restfreq))
            v1=v1.value
            cd3= v1[1]-v1[0]
-
-       return x1,y1,v1,np.abs(cd1*3600),cd3
+       #breakpoint()
+       return x1,y1,v1,np.abs(cd2*3600),cd3
            
 
     def set_rc_params(self,mult=1):
