@@ -687,7 +687,7 @@ class pymakeplots:
         ax1.set_aspect('equal')
         
         if last and not self.all_axes_physical:
-            if np.log10(self.ang2pctrans(np.max([self.xc,self.yc]))) > 3:
+            if np.log10(self.ang2pctrans(np.max([np.max(self.xc),np.max(self.yc)]))) > 3:
                 secax = ax1.secondary_yaxis('right', functions=(self.ang2kpctrans, self.ang2kpctrans_inv))
                 secax.set_ylabel(r'Dec offset (kpc)')
             else:
@@ -728,7 +728,7 @@ class pymakeplots:
             ax1.set_ylim(np.min([self.xc[0],self.yc[0]]),np.max([self.xc[-1],self.yc[-1]]))
         
         if last and not self.all_axes_physical:
-            if np.log10(self.ang2pctrans(np.max([self.xc,self.yc]))) > 3:
+            if np.log10(self.ang2pctrans(np.max([np.max(self.xc),np.max(self.yc)]))) > 3:
                 secax = ax1.secondary_yaxis('right', functions=(self.ang2kpctrans, self.ang2kpctrans_inv))
                 secax.set_ylabel(r'Dec offset (kpc)')
             else:
