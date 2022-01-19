@@ -2,8 +2,8 @@
 import numpy as np
 import scipy.interpolate as interpolate
 from astropy.io import fits
-from astropy import wcs
 import astropy.units as u
+from astropy.coordinates import SkyCoord
 from scipy import ndimage
 import matplotlib.pyplot as plt
 import matplotlib
@@ -18,11 +18,11 @@ from astropy.coordinates import ICRS
 import matplotlib.gridspec as gridspec
 from astropy.table import Table
 from pafit.fit_kinematic_pa import fit_kinematic_pa
+from radio_beam import Beam
 import warnings
 from spectral_cube import SpectralCube
 from spectral_cube.utils import SpectralCubeWarning
 warnings.filterwarnings(action='ignore', category=SpectralCubeWarning, append=True)
-warnings.filterwarnings('ignore', category=wcs.FITSFixedWarning, append=True)
 
 def running_mean(x, N):
     cumsum = np.cumsum(np.insert(x, 0, 0)) 
@@ -173,6 +173,8 @@ class pymakeplots:
         # import ipdb
         # ipdb.set_trace()
         return mask      
+
+
        
     # def get_header_coord_arrays(self,hdr):
     #     self.wcs=wcs.WCS(hdr)
@@ -181,6 +183,7 @@ class pymakeplots:
     #
     #     xp,yp=np.meshgrid(np.arange(0,maxsize),np.arange(0,maxsize))
     #     zp = xp.copy()
+    #     #breakpoint()
     #     # import ipdb
     #     # ipdb.set_trace()
     #     # #coord = wcs.celestial.pixel_to_world(50, 50)
@@ -188,6 +191,8 @@ class pymakeplots:
     #         x,y,spectral = self.wcs.all_pix2world(xp,yp,zp, 0)
     #     except:
     #         x,y,spectral,_ = self.wcs.all_pix2world(xp,yp,zp, 0,0) ## if stokes axis remains
+    #
+    #     sk=SkyCoord(x*u.deg,y*u.deg)
     #
     #     breakpoint()
     #     x1=np.median(x[0:hdr['NAXIS2'],0:hdr['NAXIS1']],0)
@@ -217,48 +222,47 @@ class pymakeplots:
     #     cd3= np.median(np.diff(v1))
     #     cd1= np.median(np.diff(x1))
     #     return x1,y1,v1,np.abs(cd1*3600),cd3
-        
-    def get_header_coord_arrays(self,hdr):
-       try:
-           cd1=hdr['CDELT1']
-           cd2=hdr['CDELT2']
 
-       except:
-           cd1=hdr['CD1_1']
-           cd2=hdr['CD2_2']
-       
-       cd1=(cd1/np.cos(np.deg2rad(hdr['CRVAL2'])))
-       
-       x1=((np.arange(0,hdr['NAXIS1'])-(hdr['CRPIX1']-1))*cd1) + hdr['CRVAL1']
-       y1=((np.arange(0,hdr['NAXIS2'])-(hdr['CRPIX2']-1))*cd2) + hdr['CRVAL2']
-
-       try:
-           cd3=hdr['CDELT3']
-       except:
-           cd3=hdr['CD3_3']
-
-
-       if (hdr['CTYPE3'] =='VRAD') or (hdr['CTYPE3'] =='VELO-LSR'):
-           v1=((np.arange(0,hdr['NAXIS3'])-(hdr['CRPIX3']-1))*cd3) + hdr['CRVAL3']
-           try:
-               if hdr['CUNIT3']=='m/s':
-                    v1/=1e3
-                    cd3/=1e3
-           except:
-                if np.max(v1) > 1e5:
-                    v1/=1e3
-                    cd3/=1e3
-       else:
-           f1=(((np.arange(0,hdr['NAXIS3'])-(hdr['CRPIX3']-1))*cd3) + hdr['CRVAL3'])*u.Hz
-           try:
-               restfreq = hdr['RESTFRQ']*u.Hz
-           except:
-               restfreq = hdr['RESTFREQ']*u.Hz
-           v1=f1.to(u.km/u.s, equivalencies=u.doppler_radio(restfreq))
-           v1=v1.value
-           cd3= v1[1]-v1[0]
-       #breakpoint()
-       return x1,y1,v1,np.abs(cd2*3600),cd3
+    # def get_header_coord_arrays_simp(self,hdr):
+    #    try:
+    #        cd1=hdr['CDELT1']
+    #        cd2=hdr['CDELT2']
+    #
+    #    except:
+    #        cd1=hdr['CD1_1']
+    #        cd2=hdr['CD2_2']
+    #
+    #    #cd1=(cd1/np.cos(np.deg2rad(hdr['CRVAL2'])))
+    #
+    #    x1=((np.arange(0,hdr['NAXIS1'])-(hdr['CRPIX1']-1))*cd1) + hdr['CRVAL1']
+    #    y1=((np.arange(0,hdr['NAXIS2'])-(hdr['CRPIX2']-1))*cd2) + hdr['CRVAL2']
+    #
+    #    try:
+    #        cd3=hdr['CDELT3']
+    #    except:
+    #        cd3=hdr['CD3_3']
+    #
+    #
+    #    if (hdr['CTYPE3'] =='VRAD') or (hdr['CTYPE3'] =='VELO-LSR'):
+    #        v1=((np.arange(0,hdr['NAXIS3'])-(hdr['CRPIX3']-1))*cd3) + hdr['CRVAL3']
+    #        try:
+    #            if hdr['CUNIT3']=='m/s':
+    #                 v1/=1e3
+    #                 cd3/=1e3
+    #        except:
+    #             if np.max(v1) > 1e5:
+    #                 v1/=1e3
+    #                 cd3/=1e3
+    #    else:
+    #        f1=(((np.arange(0,hdr['NAXIS3'])-(hdr['CRPIX3']-1))*cd3) + hdr['CRVAL3'])*u.Hz
+    #        try:
+    #            restfreq = hdr['RESTFRQ']*u.Hz
+    #        except:
+    #            restfreq = hdr['RESTFREQ']*u.Hz
+    #        v1=f1.to(u.km/u.s, equivalencies=u.doppler_radio(restfreq))
+    #        v1=v1.value
+    #        cd3= v1[1]-v1[0]
+    #    return x1,y1,v1,np.abs(cd2*3600),cd3
            
 
     def set_rc_params(self,mult=1):
@@ -294,51 +298,60 @@ class pymakeplots:
         quartery=np.array(cube.shape[1]/4.).astype(np.int)
         return np.nanstd(cube[quarterx*1:3*quarterx,1*quartery:3*quartery,chanstart:chanend])
         
-                    
+    def get_header_coord_arrays(self,hdr):
+
+        y,x=self.spectralcube.spatial_coordinate_map
+
+        x1=np.median(x[0:hdr['NAXIS2'],0:hdr['NAXIS1']],0).value
+        y1=np.median(y[0:hdr['NAXIS2'],0:hdr['NAXIS1']],1).value
+        v1=self.spectralcube.spectral_axis.value
+
+        cd3= np.median(np.diff(v1))
+        cd1= np.median(np.diff(x1))
+        
+        if np.any(np.diff(x1) > 359):
+            # we have RA=0 wrap issue
+            x1[x1 > 180]-=360
+            
+            
+        return x1,y1,v1,np.abs(cd1*3600),cd3                    
         
     def read_in_a_cube(self,path):
-        hdulist=fits.open(path)
-        hdr=hdulist[0].header
-        cube = np.squeeze(hdulist[0].data.T) #squeeze to remove singular stokes axis if present
+        self.spectralcube=SpectralCube.read(path).with_spectral_unit(u.km/u.s, velocity_convention='radio')#, rest_value=self.restfreq)
+
+        hdr=self.spectralcube.header
+        cube = np.squeeze(self.spectralcube.filled_data[:,:,:].T).value #squeeze to remove singular stokes axis if present
         cube[np.isfinite(cube) == False] = 0.0
         
         try:
-            if hdr['CASAMBM']:
-                beamtab = hdulist[1].data
+            beamtab=self.spectralcube.beam
         except:
-            beamtab=None
+            #try flipping them
+            beamvals=[self.spectralcube.header['bmaj'],self.spectralcube.header['bmin']]
+            beamtab=Beam(major=np.max(beamvals)*u.deg,minor=np.min(beamvals)*u.deg,pa=self.spectralcube.header['bpa']*u.deg)
             
         return cube, hdr, beamtab
         
     def read_primary_cube(self,cube):
         
         ### read in cube ###
-        datacube,hdr,beamtab = self.read_in_a_cube(cube)
+        datacube,hdr,beam = self.read_in_a_cube(cube)
         
-        try:
-           self.bmaj=np.median(beamtab['BMAJ'])
-           self.bmin=np.median(beamtab['BMIN'])
-           self.bpa=np.median(beamtab['BPA'])
-        except:     
-           self.bmaj=hdr['BMAJ']*3600.
-           self.bmin=hdr['BMIN']*3600.
-           self.bpa=hdr['BPA']
-        
-
+        self.bmaj=beam.major.to(u.arcsec).value
+        self.bmin=beam.minor.to(u.arcsec).value
+        self.bpa=beam.pa.value
+        self.bunit=self.spectralcube.unit.to_string()
            
         try:
             self.galname=hdr['OBJECT']
         except:
             self.galname="Galaxy"
             
-        try:
-            self.bunit=hdr['BUNIT']
-        except:
-            self.bunit="Unknown"
+        
                           
         self.xcoord,self.ycoord,self.vcoord,self.cellsize,self.dv = self.get_header_coord_arrays(hdr)
         
-        self.spectralcube= SpectralCube.read(cube).with_spectral_unit(u.km/u.s, velocity_convention='radio', rest_value=self.restfreq)
+        
         
         try:
             self.obj_ra=hdr['OBSRA']
@@ -372,8 +385,20 @@ class pymakeplots:
         self.mask_trim=self.smooth_mask(self.flat_cube_trim)
         
         
-        self.xc=(self.xcoord_trim-self.obj_ra)*(-1) * 3600.
-        self.yc=(self.ycoord_trim-self.obj_dec) * 3600. / np.cos(np.deg2rad(self.obj_dec))
+        #y,x=self.spectralcube.spatial_coordinate_map
+        #sk=SkyCoord(x,y)
+        # refpos=SkyCoord(self.obj_ra*u.deg,self.obj_dec*u.deg)
+        # sx=SkyCoord(self.xcoord*u.deg,self.obj_dec*u.deg)
+        # self.xc=sx.separation(refpos).to(u.arcsec).value #*  np.cos(np.deg2rad(self.obj_dec)) + self.obj_ra
+        # sy=SkyCoord(self.obj_ra*u.deg,self.ycoord*u.deg)
+        # self.yc=sy.separation(refpos).to(u.arcsec).value #+ self.obj_dec
+        #
+        #
+        # breakpoint()
+        self.xc=(self.xcoord_trim-self.obj_ra)*(-1) * 3600. *  np.cos(np.deg2rad(self.obj_dec))
+        self.yc=(self.ycoord_trim-self.obj_dec) * 3600. 
+        
+
         
 
         if self.gal_distance == None:
@@ -552,8 +577,8 @@ class pymakeplots:
                 self.imagesize=[self.imagesize,self.imagesize]
             
 
-            wx,=np.where((np.abs((self.xcoord-self.obj_ra)*3600.) <= self.imagesize[0]))
-            wy,=np.where((np.abs((self.ycoord-self.obj_dec)*3600.) <= self.imagesize[1]*np.cos(np.deg2rad(self.obj_dec))))
+            wx,=np.where((np.abs((self.xcoord-self.obj_ra)*3600.) <= self.imagesize[0]))#*np.cos(np.deg2rad(self.obj_dec))))
+            wy,=np.where((np.abs((self.ycoord-self.obj_dec)*3600.) <= self.imagesize[1]))
             self.spatial_trim=[np.min(wx),np.max(wx),np.min(wy),np.max(wy)]        
         
         if self.spatial_trim == None:
@@ -583,7 +608,8 @@ class pymakeplots:
             self.spatial_trim = [np.clip(np.max(wx_low) - 2*beam_in_pix,0,self.xcoord.size),np.clip(np.min(wx_high) + 2*beam_in_pix,0,self.xcoord.size)\
                                 , np.clip(np.max(wy_low) - 2*beam_in_pix,0,self.ycoord.size), np.clip(np.min(wy_high) + 2*beam_in_pix,0,self.ycoord.size)]
             
-            
+        #breakpoint()
+        #print(np.where(np.isclose(self.xcoord-self.obj_ra,0,atol=self.cellsize/3600)))   
         self.flat_cube_trim=self.flat_cube[self.spatial_trim[0]:self.spatial_trim[1],self.spatial_trim[2]:self.spatial_trim[3],self.chans2do[0]:self.chans2do[1]]
         self.pbcorr_cube_trim=self.pbcorr_cube[self.spatial_trim[0]:self.spatial_trim[1],self.spatial_trim[2]:self.spatial_trim[3],self.chans2do[0]:self.chans2do[1]]
         #self.mask_trim=self.mask[self.spatial_trim[0]:self.spatial_trim[1],self.spatial_trim[2]:self.spatial_trim[3],self.chans2do[0]:self.chans2do[1]] 
@@ -630,7 +656,6 @@ class pymakeplots:
         oldcmp = cm.get_cmap("YlOrBr", 512)
         newcmp = ListedColormap(oldcmp(np.linspace(0.15, 1, 256)))
         
-
 
         im1=ax1.contourf(self.xc,self.yc,mom0.T,levels=np.linspace(np.nanmin(mom0[mom0 > 0]),np.nanmax(mom0),10),cmap=newcmp)
         

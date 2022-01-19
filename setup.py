@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
  
 setup(name='pymakeplots',
-       version='0.1.0',
+       version='0.1.2',
        description='',
        url='https://github.com/TimothyADavis/pymakeplots',
        author='Timothy A. Davis',
@@ -19,6 +19,8 @@ setup(name='pymakeplots',
            'matplotlib>3.3.1',
            'scipy',
            'astropy',
+           'spectral-cube',
+           'radio-beam',
            'pafit',
        ],
        classifiers=[
