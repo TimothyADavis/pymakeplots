@@ -322,13 +322,18 @@ class pymakeplots:
         hdr=self.spectralcube.header
         cube = np.squeeze(self.spectralcube.filled_data[:,:,:].T).value #squeeze to remove singular stokes axis if present
         cube[np.isfinite(cube) == False] = 0.0
-        
         try:
             beamtab=self.spectralcube.beam
         except:
+            try:
+                beamtab=self.spectralcube.beams[np.floor(self.spectralcube.beams.size/2).astype(int)]
+            except:
             #try flipping them
-            beamvals=[self.spectralcube.header['bmaj'],self.spectralcube.header['bmin']]
-            beamtab=Beam(major=np.max(beamvals)*u.deg,minor=np.min(beamvals)*u.deg,pa=self.spectralcube.header['bpa']*u.deg)
+                try:
+                    beamvals=[self.spectralcube.header['bmaj'],self.spectralcube.header['bmin']]
+                    beamtab=Beam(major=np.max(beamvals)*u.deg,minor=np.min(beamvals)*u.deg,pa=self.spectralcube.header['bpa']*u.deg)
+                except:
+                    beamtab=False
             
         return cube, hdr, beamtab
         
@@ -577,7 +582,7 @@ class pymakeplots:
                 self.imagesize=[self.imagesize,self.imagesize]
             
 
-            wx,=np.where((np.abs((self.xcoord-self.obj_ra)*3600.) <= self.imagesize[0]))#*np.cos(np.deg2rad(self.obj_dec))))
+            wx,=np.where((np.abs((self.xcoord-self.obj_ra)*3600.) <= self.imagesize[0]/np.cos(np.deg2rad(self.obj_dec))))
             wy,=np.where((np.abs((self.ycoord-self.obj_dec)*3600.) <= self.imagesize[1]))
             self.spatial_trim=[np.min(wx),np.max(wx),np.min(wy),np.max(wy)]        
         
@@ -674,7 +679,7 @@ class pymakeplots:
         
         cb=self.colorbar(im1,ticks=vticks)
         
-        if self.bunit.lower() == "Jy/beam".lower():
+        if (''.join(self.bunit.split())).lower() == "Jy/beam".lower():
             cb.set_label("I$_{\\rm CO}$ (Jy beam$^{-1}$ km s$^{-1}$)")
         if self.bunit.lower() == "K".lower():
             cb.set_label("I$_{\\rm CO}$ (K km s$^{-1}$)")
@@ -1023,8 +1028,8 @@ class pymakeplots:
         spec=self.pbcorr_cube[self.spatial_trim[0]:self.spatial_trim[1],self.spatial_trim[2]:self.spatial_trim[3],:].sum(axis=0).sum(axis=0)
         spec_mask=(self.pbcorr_cube_trim*self.mask_trim).sum(axis=0).sum(axis=0)
     
-        
-        if self.bunit.lower() == "Jy/beam".lower():
+        #breakpoint()
+        if (''.join(self.bunit.split())).lower() == "Jy/beam".lower():
             
             spec*=1/self.beam_area()
             spec_mask*=1/self.beam_area()
