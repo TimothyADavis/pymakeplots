@@ -43,6 +43,7 @@ class pymakeplots:
         self.gal_distance=None
         self.posang=None
         self.vsys=None
+        self.transition='CO'
         self.moment1=None
         self.rms=None
         self.flat_cube=None
@@ -467,8 +468,8 @@ class pymakeplots:
         c = ICRS(self.obj_ra*u.degree, self.obj_dec*u.degree)
 
         thetext = (self.galname)+'\n \n'
-        thetext += (("RA: "+c.ra.to_string(u.hour, sep=':')))+'\n'
-        thetext += ("Dec: "+c.dec.to_string(u.degree, sep=':', alwayssign=True))+'\n \n'
+        thetext += (("RA: "+c.ra.to_string(u.hour, sep=':',precision=2)))+'\n'
+        thetext += ("Dec: "+c.dec.to_string(u.degree, sep=':', alwayssign=True,precision=2))+'\n \n'
         thetext += ("Vsys: "+str(int(self.vsys))+" km/s")+'\n'
         thetext += ("Dist: "+str(round(self.gal_distance,1))+" Mpc")+'\n'
         if self.gal_distance == self.vsys/70.:
@@ -531,19 +532,21 @@ class pymakeplots:
                     
         if pdf:
             plt.savefig(self.galname+"_moment"+"".join(mom.astype(np.str))+".pdf", bbox_inches = 'tight')
+            plt.close()
         else:
-            if not outsideaxis: plt.show()
-        
+            if not outsideaxis:
+                plt.show()
+                plt.close()
     
     def scalebar(self,ax,loc='lower right'):
         barlength_pc = np.ceil((np.abs(self.xc[-1]-self.xc[0])*4.84*self.gal_distance)/1000.)*100
         barlength_arc=  barlength_pc/(4.84*self.gal_distance)
         
-        if barlength_arc > 0.3*(self.xc[-1]-self.xc[0]): # go to 10 pc rounding
+        if barlength_arc > 0.3*np.abs(self.xc[-1]-self.xc[0]): # go to 10 pc rounding
             barlength_pc = np.ceil((np.abs(self.xc[-1]-self.xc[0])*4.84*self.gal_distance)/100.)*10
             barlength_arc=  barlength_pc/(4.84*self.gal_distance)
 
-        if barlength_arc > 0.3*(self.xc[-1]-self.xc[0]): # go to 1 pc rounding
+        if barlength_arc > 0.3*np.abs(self.xc[-1]-self.xc[0]): # go to 1 pc rounding
             barlength_pc = np.ceil((np.abs(self.xc[-1]-self.xc[0])*4.84*self.gal_distance)/10.)*1
             barlength_arc=  barlength_pc/(4.84*self.gal_distance)
             
@@ -660,10 +663,23 @@ class pymakeplots:
         
         oldcmp = cm.get_cmap("YlOrBr", 512)
         newcmp = ListedColormap(oldcmp(np.linspace(0.15, 1, 256)))
-        
+        maxmom0=np.nanmax(mom0)
+            
+        if maxmom0 > 0:
+            
+            minmom0=np.nanmin(mom0[mom0 > 0])
+            if minmom0==maxmom0:
+                minmom0=1e-5
+            levs=np.linspace(minmom0,maxmom0,10)
+        else:
+            levs=np.linspace(0,1,10)
+            mom0-=1    
+            
+            
+         
+        im1=ax1.contourf(self.xc,self.yc,mom0.T,levels=levs,cmap=newcmp)
 
-        im1=ax1.contourf(self.xc,self.yc,mom0.T,levels=np.linspace(np.nanmin(mom0[mom0 > 0]),np.nanmax(mom0),10),cmap=newcmp)
-        
+            
         if self.all_axes_physical:
             ax1.set_xlabel('RA offset (kpc)')
             if first: ax1.set_ylabel('Dec offset (kpc)')
@@ -672,17 +688,20 @@ class pymakeplots:
             if first: ax1.set_ylabel('Dec offset (")')
         
         
-        maxmom0=np.nanmax(mom0)
         
+                
         
-        vticks=np.linspace(0,(np.round((maxmom0 / 10**np.floor(np.log10(maxmom0))))*10**np.floor(np.log10(maxmom0))),4)
+        if maxmom0 > 0:
+                vticks=np.linspace(0,(np.round((maxmom0 / 10**np.floor(np.log10(maxmom0))))*10**np.floor(np.log10(maxmom0))),4)
+        else:
+            vticks=np.linspace(0,1,4)
         
         cb=self.colorbar(im1,ticks=vticks)
-        
+    
         if (''.join(self.bunit.split())).lower() == "Jy/beam".lower():
-            cb.set_label("I$_{\\rm CO}$ (Jy beam$^{-1}$ km s$^{-1}$)")
+            cb.set_label("I$_{\\rm "+self.transition+"}$ (Jy beam$^{-1}$ km s$^{-1}$)")
         if self.bunit.lower() == "K".lower():
-            cb.set_label("I$_{\\rm CO}$ (K km s$^{-1}$)")
+            cb.set_label("I$_{\\rm "+self.transition+"}$ (K km s$^{-1}$)")
             
             
         self.add_beam(ax1)
