@@ -295,8 +295,8 @@ class pymakeplots:
         
            
     def rms_estimate(self,cube,chanstart,chanend):
-        quarterx=np.array(cube.shape[0]/4.).astype(np.int)
-        quartery=np.array(cube.shape[1]/4.).astype(np.int)
+        quarterx=np.array(cube.shape[0]/4.).astype(int)
+        quartery=np.array(cube.shape[1]/4.).astype(int)
         return np.nanstd(cube[quarterx*1:3*quarterx,1*quartery:3*quartery,chanstart:chanend])
         
     def get_header_coord_arrays(self,hdr):
@@ -555,7 +555,7 @@ class pymakeplots:
         if np.log10(barlength_pc) > 3:
             label=(barlength_pc/1e3).astype(np.str)+ " kpc"
         else:
-            label=barlength_pc.astype(np.int).astype(np.str)+ " pc"
+            label=barlength_pc.astype(int).astype(np.str)+ " pc"
             
         asb = AnchoredSizeBar(ax.transData,  barlength_arc,   label,  loc=loc,  pad=0.25, borderpad=0.5, sep=5, frameon=False)
         ax.add_artist(asb)
@@ -610,7 +610,7 @@ class pymakeplots:
             
 
             
-            beam_in_pix = np.int(np.ceil(self.bmaj/self.cellsize))
+            beam_in_pix = int(np.ceil(self.bmaj/self.cellsize))
             
 
             self.spatial_trim = [np.clip(np.max(wx_low) - 2*beam_in_pix,0,self.xcoord.size),np.clip(np.min(wx_high) + 2*beam_in_pix,0,self.xcoord.size)\
@@ -974,7 +974,7 @@ class pymakeplots:
         rotcube= rotateImage(self.pbcorr_cube_trim*self.mask_trim,90-self.posang,[centpix_x[0],centpix_y[0]])
 
 
-        pvd=rotcube[:,np.array(rotcube.shape[1]//2-self.pvdthick).astype(np.int):np.array(rotcube.shape[1]//2+self.pvdthick).astype(np.int),:].sum(axis=1)
+        pvd=rotcube[:,np.array(rotcube.shape[1]//2-self.pvdthick).astype(int):np.array(rotcube.shape[1]//2+self.pvdthick).astype(int),:].sum(axis=1)
         
 
         
