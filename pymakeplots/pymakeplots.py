@@ -301,21 +301,16 @@ class pymakeplots:
         
     def get_header_coord_arrays(self,hdr):
 
-        y,x=self.spectralcube.spatial_coordinate_map
+        cd1=self.spectralcube.wcs.pixel_scale_matrix[0,0]*3600
+        cd2=self.spectralcube.wcs.pixel_scale_matrix[1,1]*3600
+        x1=((np.arange(0,hdr['NAXIS1'])-(hdr['NAXIS1']//2))*cd1)# + hdr['CRVAL1']
+        y1=((np.arange(0,hdr['NAXIS2'])-(hdr['NAXIS1']//2))*cd2)# + hdr['CRVAL2']
 
-        x1=np.median(x[0:hdr['NAXIS2'],0:hdr['NAXIS1']],0).value
-        y1=np.median(y[0:hdr['NAXIS2'],0:hdr['NAXIS1']],1).value
         v1=self.spectralcube.spectral_axis.value
 
         cd3= np.median(np.diff(v1))
-        cd1= np.median(np.diff(x1))
-        
-        if np.any(np.diff(x1) > 359):
-            # we have RA=0 wrap issue
-            x1[x1 > 180]-=360
             
-            
-        return x1,y1,v1,np.abs(cd1*3600),cd3                    
+        return x1,y1,v1,np.abs(cd1),cd3                    
         
     def read_in_a_cube(self,path):
         self.spectralcube=SpectralCube.read(path).with_spectral_unit(u.km/u.s, velocity_convention='radio')#, rest_value=self.restfreq)
@@ -359,17 +354,9 @@ class pymakeplots:
         
         
         
-        try:
-            self.obj_ra=hdr['OBSRA']
-            self.obj_dec=hdr['OBSDEC']
-            if (self.obj_ra > np.max(self.xcoord)) or (self.obj_ra < np.min(self.xcoord)) or (self.obj_dec < np.min(self.ycoord)) or (self.obj_dec > np.max(self.ycoord)):
-                # obsra/dec given in the headers arent in the observed field! Fall back on medians.
-                if not self.silent: print("OBSRA/OBSDEC keywords dont seem correct! Assuming galaxy centre is at pointing centre")
-                self.obj_ra=np.median(self.xcoord)
-                self.obj_dec=np.median(self.ycoord)
-        except:
-            self.obj_ra=np.median(self.xcoord)
-            self.obj_dec=np.median(self.ycoord)
+        _centskycoord=self.spectralcube.wcs.celestial.pixel_to_world(self.xcoord.size//2,self.ycoord.size//2).transform_to('icrs')
+        self.obj_ra=_centskycoord.ra.value
+        self.obj_dec=_centskycoord.dec.value
         
             
             
@@ -401,8 +388,8 @@ class pymakeplots:
         #
         #
         # breakpoint()
-        self.xc=(self.xcoord_trim-self.obj_ra)*(-1) * 3600. *  np.cos(np.deg2rad(self.obj_dec))
-        self.yc=(self.ycoord_trim-self.obj_dec) * 3600. 
+        self.xc=self.xcoord_trim*(-1) 
+        self.yc=self.ycoord_trim 
         
 
         
@@ -585,8 +572,8 @@ class pymakeplots:
                 self.imagesize=[self.imagesize,self.imagesize]
             
 
-            wx,=np.where((np.abs((self.xcoord-self.obj_ra)*3600.) <= self.imagesize[0]/np.cos(np.deg2rad(self.obj_dec))))
-            wy,=np.where((np.abs((self.ycoord-self.obj_dec)*3600.) <= self.imagesize[1]))
+            wx,=np.where((np.abs(self.xcoord) <= self.imagesize[0]))
+            wy,=np.where((np.abs(self.ycoord) <= self.imagesize[1]))
             self.spatial_trim=[np.min(wx),np.max(wx),np.min(wy),np.max(wy)]        
         
         if self.spatial_trim == None:
