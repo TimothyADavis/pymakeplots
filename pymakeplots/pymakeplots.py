@@ -354,9 +354,13 @@ class pymakeplots:
         
         
         
-        _centskycoord=self.spectralcube.wcs.celestial.pixel_to_world(self.xcoord.size//2,self.ycoord.size//2).transform_to('icrs')
-        self.obj_ra=_centskycoord.ra.value
-        self.obj_dec=_centskycoord.dec.value
+        self.centskycoord=self.spectralcube.wcs.celestial.pixel_to_world(self.xcoord.size//2,self.ycoord.size//2).transform_to('icrs')
+        self.x_skycent=self.centskycoord.ra.value
+        self.y_skycent=self.centskycoord.dec.value
+        if self.obj_ra == None:
+            self.obj_ra=self.x_skycent
+        if self.obj_dec == None:
+            self.obj_dec=self.y_skycent
         
             
             
@@ -388,8 +392,8 @@ class pymakeplots:
         #
         #
         # breakpoint()
-        self.xc=self.xcoord_trim*(-1) 
-        self.yc=self.ycoord_trim 
+        self.xc=(self.xcoord_trim+(self.x_skycent-self.obj_ra)*3600)  *(-1) 
+        self.yc=self.ycoord_trim+(self.y_skycent-self.obj_dec)*3600
         
 
         
@@ -572,8 +576,8 @@ class pymakeplots:
                 self.imagesize=[self.imagesize,self.imagesize]
             
 
-            wx,=np.where((np.abs(self.xcoord) <= self.imagesize[0]))
-            wy,=np.where((np.abs(self.ycoord) <= self.imagesize[1]))
+            wx,=np.where((np.abs(self.xcoord+(self.x_skycent-self.obj_ra)*3600) <= self.imagesize[0]))
+            wy,=np.where((np.abs(self.ycoord+(self.y_skycent-self.obj_dec)*3600) <= self.imagesize[1]))
             self.spatial_trim=[np.min(wx),np.max(wx),np.min(wy),np.max(wy)]        
         
         if self.spatial_trim == None:
