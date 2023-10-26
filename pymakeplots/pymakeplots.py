@@ -303,8 +303,8 @@ class pymakeplots:
 
         cd1=self.spectralcube.wcs.pixel_scale_matrix[0,0]*3600
         cd2=self.spectralcube.wcs.pixel_scale_matrix[1,1]*3600
-        x1=((np.arange(0,hdr['NAXIS1'])-(hdr['NAXIS1']//2))*cd1)# + hdr['CRVAL1']
-        y1=((np.arange(0,hdr['NAXIS2'])-(hdr['NAXIS1']//2))*cd2)# + hdr['CRVAL2']
+        x1=((np.arange(1,hdr['NAXIS1']+1)-(hdr['NAXIS1']//2))*cd1)# + hdr['CRVAL1']
+        y1=((np.arange(1,hdr['NAXIS2']+1)-(hdr['NAXIS1']//2))*cd2)# + hdr['CRVAL2']
 
         v1=self.spectralcube.spectral_axis.value
 
