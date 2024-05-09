@@ -47,6 +47,8 @@ class pymakeplots:
         self.moment1=None
         self.rms=None
         self.flat_cube=None
+        self.obj_ra_pix=None
+        self.obj_dec_pix=None
         self.pbcorr_cube=None
         self.spectralcube=None
         self.mask=None
@@ -332,6 +334,8 @@ class pymakeplots:
                     beamtab=False
             
         return cube, hdr, beamtab
+    
+
         
     def read_primary_cube(self,cube):
         
@@ -351,19 +355,10 @@ class pymakeplots:
         
                           
         self.xcoord,self.ycoord,self.vcoord,self.cellsize,self.dv = self.get_header_coord_arrays(hdr)
+        #breakpoint()
         
         
-        
-        self.centskycoord=self.spectralcube.wcs.celestial.pixel_to_world(self.xcoord.size//2,self.ycoord.size//2).transform_to('icrs')
-        self.x_skycent=self.centskycoord.ra.value
-        self.y_skycent=self.centskycoord.dec.value
-        if self.obj_ra == None:
-            self.obj_ra=self.x_skycent
-        if self.obj_dec == None:
-            self.obj_dec=self.y_skycent
-        
-            
-            
+
         
         if self.dv < 0:
             datacube = np.flip(datacube,axis=2)
@@ -377,23 +372,27 @@ class pymakeplots:
     
     def prepare_cubes(self):
         
-        self.clip_cube()
+        self.centskycoord=self.spectralcube.wcs.celestial.pixel_to_world(self.xcoord.size//2,self.ycoord.size//2).transform_to('icrs')
+        self.x_skycent=self.centskycoord.ra.value
+        self.y_skycent=self.centskycoord.dec.value
+        if self.obj_ra == None:
+           self.obj_ra=self.x_skycent
+        if self.obj_dec == None:
+           self.obj_dec=self.y_skycent
+        
+        refpos=SkyCoord(self.obj_ra*u.deg,self.obj_dec*u.deg)
+        xpix,ypix=self.spectralcube.wcs.celestial.world_to_pixel(refpos)
+            
+        xoffsetarc=np.interp(xpix,np.arange(self.xcoord.size),self.xcoord)
+        yoffsetarc=np.interp(ypix,np.arange(self.ycoord.size),self.ycoord)
+
+        
+        self.clip_cube(xoffsetarc,yoffsetarc)
             
         self.mask_trim=self.smooth_mask(self.flat_cube_trim)
         
-        
-        #y,x=self.spectralcube.spatial_coordinate_map
-        #sk=SkyCoord(x,y)
-        # refpos=SkyCoord(self.obj_ra*u.deg,self.obj_dec*u.deg)
-        # sx=SkyCoord(self.xcoord*u.deg,self.obj_dec*u.deg)
-        # self.xc=sx.separation(refpos).to(u.arcsec).value #*  np.cos(np.deg2rad(self.obj_dec)) + self.obj_ra
-        # sy=SkyCoord(self.obj_ra*u.deg,self.ycoord*u.deg)
-        # self.yc=sy.separation(refpos).to(u.arcsec).value #+ self.obj_dec
-        #
-        #
-        # breakpoint()
-        self.xc=(self.xcoord_trim+(self.x_skycent-self.obj_ra)*3600)  *(-1) 
-        self.yc=self.ycoord_trim+(self.y_skycent-self.obj_dec)*3600
+
+
         
 
         
@@ -442,15 +441,16 @@ class pymakeplots:
         self.make_spec(axes=ax5,fits=fits)
         
         ### plotting PA on mom1
-        ypv=self.yc
-        xpv=self.yc*0.0
+        ypv=np.arange(-np.max(self.yc),np.max(self.yc),20)
+        xpv=ypv*0.0
         ang=self.posang
         c = np.cos(np.deg2rad(ang))
         s = np.sin(np.deg2rad(ang))
         x2 =  c*xpv - s*ypv
         y2 =  s*xpv + c*ypv
+        ax2.scatter(0,0,facecolors='none',edgecolors='k')
         ax2.plot(x2,y2,'k--')
-
+        #breakpoint()
 
         ###### make summary box
         
@@ -469,7 +469,7 @@ class pymakeplots:
 
 
         at2 = AnchoredText(thetext,
-                           loc='upper right', prop=dict(size=30,multialignment='right'), frameon=False,
+                           loc='upper right', prop=dict(size=25,multialignment='right'), frameon=False,
                            bbox_transform=textaxes.transAxes
                            )
         textaxes.add_artist(at2)
@@ -522,7 +522,7 @@ class pymakeplots:
 
                     
         if pdf:
-            plt.savefig(self.galname+"_moment"+"".join(mom.astype(np.str))+".pdf", bbox_inches = 'tight')
+            plt.savefig(self.galname+"_moment"+"".join(mom.astype(str))+".pdf", bbox_inches = 'tight')
             plt.close()
         else:
             if not outsideaxis:
@@ -544,9 +544,9 @@ class pymakeplots:
             
         
         if np.log10(barlength_pc) > 3:
-            label=(barlength_pc/1e3).astype(np.str)+ " kpc"
+            label=(barlength_pc/1e3).astype(str)+ " kpc"
         else:
-            label=barlength_pc.astype(int).astype(np.str)+ " pc"
+            label=barlength_pc.astype(int).astype(str)+ " pc"
             
         asb = AnchoredSizeBar(ax.transData,  barlength_arc,   label,  loc=loc,  pad=0.25, borderpad=0.5, sep=5, frameon=False)
         ax.add_artist(asb)
@@ -555,7 +555,11 @@ class pymakeplots:
         
         
             
-    def clip_cube(self):
+    def clip_cube(self,xoffsetarc,yoffsetarc):
+        
+        #
+        
+        
         
         if self.chans2do == None:
             # use the mask to try and guess the channels with signal.
@@ -576,18 +580,19 @@ class pymakeplots:
                 self.imagesize=[self.imagesize,self.imagesize]
             
 
-            wx,=np.where((np.abs(self.xcoord+(self.x_skycent-self.obj_ra)*3600) <= self.imagesize[0]))
-            wy,=np.where((np.abs(self.ycoord+(self.y_skycent-self.obj_dec)*3600) <= self.imagesize[1]))
-            self.spatial_trim=[np.min(wx),np.max(wx),np.min(wy),np.max(wy)]        
+            wx,=np.where(np.abs(self.xcoord-xoffsetarc) <= self.imagesize[0])
+            wy,=np.where(np.abs(self.ycoord-yoffsetarc) <= self.imagesize[1])
+            self.spatial_trim=[np.min(wx),np.max(wx),np.min(wy),np.max(wy)]  
+                  
         
         if self.spatial_trim == None:
             
             mom0=(self.pbcorr_cube > self.rmsfac*self.rms).sum(axis=2)
             mom0[mom0>0]=1
             
-            cumulative_x = np.nancumsum(mom0.sum(axis=1),dtype=np.float)
+            cumulative_x = np.nancumsum(mom0.sum(axis=1),dtype=float)
             cumulative_x /= np.nanmax(cumulative_x)
-            cumulative_y = np.nancumsum(mom0.sum(axis=0),dtype=np.float)
+            cumulative_y = np.nancumsum(mom0.sum(axis=0),dtype=float)
             cumulative_y /= np.nanmax(cumulative_y)
             
             wx_low,=np.where(cumulative_x < 0.02)
@@ -607,7 +612,6 @@ class pymakeplots:
             self.spatial_trim = [np.clip(np.max(wx_low) - 2*beam_in_pix,0,self.xcoord.size),np.clip(np.min(wx_high) + 2*beam_in_pix,0,self.xcoord.size)\
                                 , np.clip(np.max(wy_low) - 2*beam_in_pix,0,self.ycoord.size), np.clip(np.min(wy_high) + 2*beam_in_pix,0,self.ycoord.size)]
             
-        #breakpoint()
         #print(np.where(np.isclose(self.xcoord-self.obj_ra,0,atol=self.cellsize/3600)))   
         self.flat_cube_trim=self.flat_cube[self.spatial_trim[0]:self.spatial_trim[1],self.spatial_trim[2]:self.spatial_trim[3],self.chans2do[0]:self.chans2do[1]]
         self.pbcorr_cube_trim=self.pbcorr_cube[self.spatial_trim[0]:self.spatial_trim[1],self.spatial_trim[2]:self.spatial_trim[3],self.chans2do[0]:self.chans2do[1]]
@@ -616,7 +620,8 @@ class pymakeplots:
         self.xcoord_trim=self.xcoord[self.spatial_trim[0]:self.spatial_trim[1]]
         self.ycoord_trim=self.ycoord[self.spatial_trim[2]:self.spatial_trim[3]]
         self.vcoord_trim=self.vcoord[self.chans2do[0]:self.chans2do[1]]  
-            
+        self.xc=(self.xcoord_trim-xoffsetarc)*(-1) 
+        self.yc=(self.ycoord_trim-yoffsetarc)    
            
             
     
@@ -634,11 +639,11 @@ class pymakeplots:
         
     def add_beam(self,ax):    
         if self.all_axes_physical:
-            ae = AnchoredEllipse(ax.transData, width=self.ang2kpctrans(self.bmaj), height=self.ang2kpctrans(self.bmin), angle=self.bpa,
+            ae = AnchoredEllipse(ax.transData, width=self.ang2kpctrans(self.bmaj), height=self.ang2kpctrans(self.bmin), angle=self.bpa+90,
                              loc='lower left', pad=0.5, borderpad=0.4,
                              frameon=False)
         else:
-            ae = AnchoredEllipse(ax.transData, width=self.bmaj, height=self.bmin, angle=self.bpa,
+            ae = AnchoredEllipse(ax.transData, width=self.bmaj, height=self.bmin, angle=self.bpa+90,
                              loc='lower left', pad=0.5, borderpad=0.4,
                              frameon=False)                   
         ae.ellipse.set_edgecolor('black')
@@ -666,10 +671,10 @@ class pymakeplots:
             levs=np.linspace(0,1,10)
             mom0-=1    
             
-            
-         
+        #mom0[mom0<minmom0]=np.nan    
+        #breakpoint() 
         im1=ax1.contourf(self.xc,self.yc,mom0.T,levels=levs,cmap=newcmp)
-
+        #im1=ax1.pcolormesh(self.xc,self.yc,mom0.T,cmap=newcmp,vmin=minmom0,vmax=maxmom0)
             
         if self.all_axes_physical:
             ax1.set_xlabel('RA offset (kpc)')
@@ -816,9 +821,9 @@ class pymakeplots:
       
     def write_fits(self,array,whichmoment):
         if self.fits == True:
-            filename=self.galname+"_mom"+"".join(np.array([whichmoment]).astype(np.str))+".fits"
+            filename=self.galname+"_mom"+"".join(np.array([whichmoment]).astype(str))+".fits"
         else:
-            filename=self.fits+"_mom"+"".join(np.array([whichmoment]).astype(np.str))+".fits"
+            filename=self.fits+"_mom"+"".join(np.array([whichmoment]).astype(str))+".fits"
         
   
         newhdu = fits.PrimaryHDU(array)
@@ -959,10 +964,10 @@ class pymakeplots:
                     
         centpix_x=np.where(np.isclose(self.xc,0.0,atol=self.cellsize/1.9))[0]
         centpix_y=np.where(np.isclose(self.yc,0.0,atol=self.cellsize/1.9))[0]
-        
+        #breakpoint()
 
 
-        rotcube= rotateImage(self.pbcorr_cube_trim*self.mask_trim,90-self.posang,[centpix_x[0],centpix_y[0]])
+        rotcube= rotateImage(self.pbcorr_cube_trim*self.mask_trim,90-self.posang,[centpix_y[0],centpix_x[0]])
 
 
         pvd=rotcube[:,np.array(rotcube.shape[1]//2-self.pvdthick).astype(int):np.array(rotcube.shape[1]//2+self.pvdthick).astype(int),:].sum(axis=1)
@@ -1037,7 +1042,7 @@ class pymakeplots:
             outsideaxis=1
         spec=self.pbcorr_cube[self.spatial_trim[0]:self.spatial_trim[1],self.spatial_trim[2]:self.spatial_trim[3],:].sum(axis=0).sum(axis=0)
         spec_mask=(self.pbcorr_cube_trim*self.mask_trim).sum(axis=0).sum(axis=0)
-    
+        ylab="Unknown"
         #breakpoint()
         if (''.join(self.bunit.split())).lower() == "Jy/beam".lower():
             
