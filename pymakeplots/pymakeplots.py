@@ -860,7 +860,7 @@ class pymakeplots:
         newhdu.header['CUNIT2']=self.spectralcube.header['CUNIT2']
         newhdu.header['BMAJ']=self.bmaj/3600.
         newhdu.header['BMIN']=self.bmin/3600.
-        newhdu.header['BPA']=self.bpa/3600.
+        newhdu.header['BPA']=self.bpa
         newhdu.header['MOMCLIP']=(self.cliplevel, self.bunit+' km/s')
         newhdu.header['VSYS']=(self.vsys,'km/s')
         newhdu.header['comment'] = 'Moment map created with pymakeplots'
@@ -895,7 +895,7 @@ class pymakeplots:
         newhdu.header['CUNIT2']='km/s'
         newhdu.header['BMAJ']=self.bmaj/3600.
         newhdu.header['BMIN']=self.bmin/3600.
-        newhdu.header['BPA']=self.bpa/3600.
+        newhdu.header['BPA']=self.bpa
         newhdu.header['PVDANGLE']=(self.posang,'deg')
         newhdu.header['PVDTHICK']=(self.pvdthick,'pixels')
         newhdu.header['MOMCLIP']=(self.cliplevel, self.bunit+' km/s')
