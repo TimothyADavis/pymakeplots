@@ -66,6 +66,7 @@ class pymakeplots:
         self.bardist=None
         self.rmsfac=3
         self.restfreq=None
+        self.repfreq=None
         self.obj_ra=None
         self.obj_dec=None
         self.imagesize=None
@@ -78,6 +79,10 @@ class pymakeplots:
         self.spatial_trim = None
         self.maxvdisp=None
         self.cliplevel=None
+        self.points2plot=None
+        self.pointingsra=None
+        self.pointingsdec=None
+        self.pointingsdiam=None
         self.fits=False
         self.pvdthick=5.    
         self.flipped=False
@@ -170,8 +175,9 @@ class pymakeplots:
         sigma = 1.5 * self.bmaj / self.cellsize
         smooth_cube = ndimage.uniform_filter(cube, size=[sigma, sigma,4], mode='constant')  # mode='nearest'
         newrms= self.rms_estimate(smooth_cube,0,1) 
-        self.cliplevel=newrms*self.rmsfac   
-        mask=(smooth_cube > self.cliplevel)
+        self.cliplevel=self.rms*self.rmsfac 
+        self.maskcliplevel=newrms*self.rmsfac   
+        mask=(smooth_cube > self.maskcliplevel)
         # print("Clip level:",((3e20*1.6014457E-20*91.9)/(self.bmaj*self.bmin))*self.cliplevel*self.dv)
         # import ipdb
         # ipdb.set_trace()
@@ -302,7 +308,8 @@ class pymakeplots:
         return np.nanstd(cube[quarterx*1:3*quarterx,1*quartery:3*quartery,chanstart:chanend])
         
     def get_header_coord_arrays(self,hdr):
-
+        
+            
         cd1=self.spectralcube.wcs.pixel_scale_matrix[0,0]*3600
         cd2=self.spectralcube.wcs.pixel_scale_matrix[1,1]*3600
         x1=((np.arange(1,hdr['NAXIS1']+1)-(hdr['NAXIS1']//2))*cd1)# + hdr['CRVAL1']
@@ -311,6 +318,7 @@ class pymakeplots:
         v1=self.spectralcube.spectral_axis.value
 
         cd3= np.median(np.diff(v1))
+       
             
         return x1,y1,v1,np.abs(cd1),cd3                    
         
@@ -332,7 +340,7 @@ class pymakeplots:
                     beamtab=Beam(major=np.max(beamvals)*u.deg,minor=np.min(beamvals)*u.deg,pa=self.spectralcube.header['bpa']*u.deg)
                 except:
                     beamtab=False
-            
+        self.repfreq=np.median(self.spectralcube.with_spectral_unit(u.GHz).spectral_axis)  
         return cube, hdr, beamtab
     
 
@@ -369,7 +377,15 @@ class pymakeplots:
         
         self.rms= self.rms_estimate(datacube,self.linefree_chans_start,self.linefree_chans_end) 
         return datacube
-    
+   
+    def calc_offset(self,ra,dec):
+        refpos=SkyCoord(ra,dec)
+        xpix,ypix=self.spectralcube.wcs.celestial.world_to_pixel(refpos)
+        #self.xcentpix,self.ycentpix= xpix,ypix   
+        xoffsetarc=np.interp(xpix,np.arange(self.xcoord.size),self.xcoord)
+        yoffsetarc=np.interp(ypix,np.arange(self.ycoord.size),self.ycoord)
+        return xpix,ypix,xoffsetarc,yoffsetarc
+        
     def prepare_cubes(self):
         
         self.centskycoord=self.spectralcube.wcs.celestial.pixel_to_world(self.xcoord.size//2,self.ycoord.size//2).transform_to('icrs')
@@ -380,12 +396,19 @@ class pymakeplots:
         if self.obj_dec == None:
            self.obj_dec=self.y_skycent
         
-        refpos=SkyCoord(self.obj_ra*u.deg,self.obj_dec*u.deg)
-        xpix,ypix=self.spectralcube.wcs.celestial.world_to_pixel(refpos)
-            
-        xoffsetarc=np.interp(xpix,np.arange(self.xcoord.size),self.xcoord)
-        yoffsetarc=np.interp(ypix,np.arange(self.ycoord.size),self.ycoord)
 
+        xpix,ypix,xoffsetarc,yoffsetarc=self.calc_offset(self.obj_ra*u.deg,self.obj_dec*u.deg)
+        self.xcentpix,self.ycentpix= xpix,ypix  
+        
+        
+        ### want to overplot the pointings
+        if self.pointingsra != None:
+            pointingposes=SkyCoord(self.pointingsra,self.pointingsdec,frame='icrs',unit=(u.hourangle,u.deg))
+            _,_,pointoffsetx,pointoffsety=self.calc_offset(pointingposes.ra,pointingposes.dec)
+            self.points2plot=np.zeros((len(pointoffsetx),3))
+            self.points2plot[:,0]=pointoffsetx-xoffsetarc
+            self.points2plot[:,1]=pointoffsety-yoffsetarc
+            self.points2plot[:,2]=self.pointingsdiam.value
         
         self.clip_cube(xoffsetarc,yoffsetarc)
             
@@ -404,6 +427,8 @@ class pymakeplots:
         if self.all_axes_physical:
             self.xc=self.ang2kpctrans(self.xc)
             self.yc=self.ang2kpctrans(self.yc)
+            if self.pointingsra != None:
+                self.points2plot=self.ang2kpctrans(self.points2plot)
 
             
     
@@ -441,7 +466,7 @@ class pymakeplots:
         self.make_spec(axes=ax5,fits=fits)
         
         ### plotting PA on mom1
-        ypv=np.arange(-np.max(self.yc),np.max(self.yc),20)
+        ypv=np.arange(-np.max(self.yc),np.max(self.yc),self.cellsize)
         xpv=ypv*0.0
         ang=self.posang
         c = np.cos(np.deg2rad(ang))
@@ -701,6 +726,29 @@ class pymakeplots:
             
             
         self.add_beam(ax1)
+        
+        if np.any(self.points2plot != None):
+            naca=0
+            nalma=0
+            for xp,yp,diam in self.points2plot:
+                if diam/np.min(self.points2plot[:,2])>1.7:
+                    ls=':' #aca
+                    if naca ==0:
+                        label='ACA'
+                    else:
+                        label=None
+                    naca+=1
+                else:
+                    ls='--' #12m
+                    if nalma ==0:
+                        label='12m'
+                    else:
+                        label=None
+                    nalma+=1
+                circle2 = plt.Circle((xp, yp), diam/2., color='k',ls=ls, fill=False,alpha=0.2,label=label)
+                ax1.add_patch(circle2)
+            ax1.legend(frameon=False,loc='upper left',fontsize='x-small',markerscale=0.5)    
+        
         if self.make_square:
             ax1.set_xlim(np.min([self.xc[0],self.yc[0]]),np.max([self.xc[-1],self.yc[-1]]))
             ax1.set_ylim(np.min([self.xc[0],self.yc[0]]),np.max([self.xc[-1],self.yc[-1]]))
@@ -725,7 +773,7 @@ class pymakeplots:
         mom1=mom0.copy()*np.nan
         mom1[mom0 != 0.0] = (((self.pbcorr_cube_trim*self.mask_trim)*self.vcoord_trim).sum(axis=2))[mom0 != 0.0]/mom0[mom0 != 0.0]
         
-        
+
         vticks=np.linspace((-1)*np.ceil(np.max(np.abs(self.vcoord_trim-self.vsys))/10.)*10.,np.ceil(np.max(np.abs(self.vcoord_trim-self.vsys))/10.)*10.,5)
         
         im1=ax1.contourf(self.xc,self.yc,mom1.T-self.vsys,levels=self.vcoord_trim-self.vsys,cmap=sauron,vmin=vticks[0],vmax=vticks[-1])
@@ -861,7 +909,7 @@ class pymakeplots:
         newhdu.header['BMAJ']=self.bmaj/3600.
         newhdu.header['BMIN']=self.bmin/3600.
         newhdu.header['BPA']=self.bpa
-        newhdu.header['MOMCLIP']=(self.cliplevel, self.bunit+' km/s')
+        newhdu.header['MOMCLIP']=(self.maskcliplevel, self.bunit+' km/s')
         newhdu.header['VSYS']=(self.vsys,'km/s')
         newhdu.header['comment'] = 'Moment map created with pymakeplots'
 
@@ -881,7 +929,7 @@ class pymakeplots:
             filename=self.galname+"_pvd.fits"
         else:
             filename=self.fits+"_pvd.fits"
-            
+           
         newhdu = fits.PrimaryHDU(pvd)
         newhdu.header['CRPIX1']=1
         newhdu.header['CRVAL1']=xx[0]
@@ -898,7 +946,7 @@ class pymakeplots:
         newhdu.header['BPA']=self.bpa
         newhdu.header['PVDANGLE']=(self.posang,'deg')
         newhdu.header['PVDTHICK']=(self.pvdthick,'pixels')
-        newhdu.header['MOMCLIP']=(self.cliplevel, self.bunit+' km/s')
+        newhdu.header['MOMCLIP']=(self.maskcliplevel, self.bunit+' km/s')
         newhdu.header['VSYS']=(self.vsys,'km/s')
         newhdu.header['comment'] = 'Moment map created with pymakeplots'
         newhdu.header['BUNIT'] = self.bunit+' km/s'
@@ -906,7 +954,7 @@ class pymakeplots:
         newhdu.writeto(filename,overwrite=True)   
             
     def make_pvd(self,axes=None,fits=False,pdf=False):
-        
+        self.fits=fits
         if np.any(self.xc) == None:
             self.prepare_cubes()
         
@@ -934,13 +982,14 @@ class pymakeplots:
             else:
                 print("Downsampling the observed moment one in PA estimate for speed. Set `useallpixels` to override.")    
                 mom1[np.isfinite(mom1) == False] = self.vsys
-                interper = interpolate.interp2d(self.xc,self.yc,mom1-self.vsys,bounds_error=False,fill_value=np.nan)
+                #breakpoint()
+                interper = interpolate.RegularGridInterpolator((self.xc,self.yc),(mom1-self.vsys).T,bounds_error=False,fill_value=np.nan)
                 x=np.linspace(np.min(self.xc),np.max(self.xc),50)
                 y=np.linspace(np.min(self.yc),np.max(self.yc),50)
-                v= interper(x,y)
                 xv, yv = np.meshgrid(x,y)
+                v= interper((xv,yv))
                 x,y,v = xv.flatten(),yv.flatten(),v.flatten()
-                
+               
             self.posang,_,_ = fit_kinematic_pa(x[np.isfinite(v)],y[np.isfinite(v)],v[np.isfinite(v)],nsteps=36,plot=False,quiet=True)
             
             if np.sin(np.deg2rad((self.posang+45)*2)) > 0:
@@ -964,10 +1013,10 @@ class pymakeplots:
                     
         centpix_x=np.where(np.isclose(self.xc,0.0,atol=self.cellsize/1.9))[0]
         centpix_y=np.where(np.isclose(self.yc,0.0,atol=self.cellsize/1.9))[0]
-        #breakpoint()
+        
 
 
-        rotcube= rotateImage(self.pbcorr_cube_trim*self.mask_trim,90-self.posang,[centpix_y[0],centpix_x[0]])
+        rotcube= rotateImage(self.pbcorr_cube_trim*self.mask_trim,90-self.posang,[centpix_x[0],centpix_y[0]])
 
 
         pvd=rotcube[:,np.array(rotcube.shape[1]//2-self.pvdthick).astype(int):np.array(rotcube.shape[1]//2+self.pvdthick).astype(int),:].sum(axis=1)
@@ -1004,13 +1053,16 @@ class pymakeplots:
         
         if self.all_axes_physical:
              axes.set_xlabel('Offset (kpc)')
+             secaxy = axes.secondary_xaxis('top', functions=(self.ang2kpctrans_inv, self.ang2kpctrans))
+             secaxy.set_xlabel('Offset (")')
         else:
              axes.set_xlabel('Offset (")')
-       
+             secaxy = axes.secondary_xaxis('top', functions=(self.ang2kpctrans, self.ang2kpctrans_inv))
+             secaxy.set_xlabel('Offset (kpc)')
+             
         axes.set_ylabel('Velocity (km s$^{-1}$)')
         
-        secaxy = axes.secondary_xaxis('top', functions=(self.ang2kpctrans, self.ang2kpctrans_inv))
-        secaxy.set_xlabel('Offset (kpc)')
+
         
         secax = axes.secondary_yaxis('right', functions=(self.vsystrans, self.vsystrans_inv))
         secax.set_ylabel(r'V$_{\rm offset}$ (km s$^{-1}$)')
@@ -1020,7 +1072,7 @@ class pymakeplots:
         
         if self.gal_distance != None and not self.all_axes_physical:
             self.scalebar(axes,loc=loc2)
-        
+
         if self.fits:
             self.write_pvd_fits(pvdaxis,vaxis,pvd.T)
         
