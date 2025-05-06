@@ -12,8 +12,8 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.patches import Ellipse,Rectangle
 from matplotlib import cm
 from matplotlib.colors import ListedColormap, LinearSegmentedColormap
-from matplotlib.offsetbox import AnchoredText
-from mpl_toolkits.axes_grid1.anchored_artists import AnchoredEllipse,AnchoredSizeBar
+from matplotlib.offsetbox import AnchoredText,AuxTransformBox, AnchoredOffsetbox
+from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 from astropy.coordinates import ICRS
 import matplotlib.gridspec as gridspec
 from astropy.table import Table
@@ -23,6 +23,8 @@ import warnings
 from spectral_cube import SpectralCube
 from spectral_cube.utils import SpectralCubeWarning
 warnings.filterwarnings(action='ignore', category=SpectralCubeWarning, append=True)
+from scipy.stats import mode
+
 
 def running_mean(x, N):
     cumsum = np.cumsum(np.insert(x, 0, 0)) 
@@ -38,7 +40,7 @@ def rotateImage(img, angle, pivot):
 
 
 class pymakeplots:
-    def __init__(self,cube_flat=None,pb=None,cube=None):
+    def __init__(self,cube_flat=None,pb=None,cube=None,rest_value=None):
         self.galname=None
         self.gal_distance=None
         self.posang=None
@@ -88,24 +90,27 @@ class pymakeplots:
         self.flipped=False
         self.make_square=True
         self.useallpixels = False
+        self.suppress_subbeam_artifacts=False
         #self.wcs=None
         
         if (cube != None)&(pb==None)&(cube_flat==None):
             # only one cube given
-            self.input_cube_nopb(cube)
+            self.input_cube_nopb(cube,rest_value=rest_value)
             
         if (cube != None)&(pb!=None):
             # pbcorred cube and pb given
-            self.input_cube_pbcorr(cube,pb)
+            self.input_cube_pbcorr(cube,pb,rest_value=rest_value)
         
         if (cube_flat != None)&(pb!=None):
             # flat cube and pb given
             if np.any(self.pbcorr_cube) == None: #check if the user gave all three cubes, in which case this call is redundant
-                self.input_cube_flat(cube_flat,pb)  
+                self.input_cube_flat(cube_flat,pb,rest_value=rest_value)  
               
         if (cube != None)&(pb==None)&(cube_flat!=None):
             # pbcorred cube and flat cube given
-            self.input_cube_pbcorr_and_flat(cube,cube_flat)        
+            self.input_cube_pbcorr_and_flat(cube,cube_flat,rest_value=rest_value)
+        
+        self.cube_for_param_guesses=self.flat_cube            
             
     def vsystrans_inv(self,val):
         return val +self.vsys
@@ -129,21 +134,21 @@ class pymakeplots:
     def beam_area(self):
         return (np.pi*(self.bmaj/self.cellsize)*(self.bmin/self.cellsize))/(4*np.log(2))
         
-    def input_cube_pbcorr(self,path_to_pbcorr_cube,path_to_pb):
+    def input_cube_pbcorr(self,path_to_pbcorr_cube,path_to_pb,rest_value=None):
        
-       self.pbcorr_cube = self.read_primary_cube(path_to_pbcorr_cube) 
+       self.pbcorr_cube = self.read_primary_cube(path_to_pbcorr_cube,rest_value=rest_value) 
        
-       pb,hdr,_= self.read_in_a_cube(path_to_pb)
+       pb,hdr,_= self.read_in_a_cube(path_to_pb,rest_value=rest_value)
        if self.flipped: pb=np.flip(pb,axis=2)
 
        self.flat_cube = self.pbcorr_cube*pb
                           
     
-    def input_cube_flat(self,path_to_flat_cube,path_to_pb):
+    def input_cube_flat(self,path_to_flat_cube,path_to_pb,rest_value=None):
        
-       self.flat_cube = self.read_primary_cube(path_to_flat_cube)
+       self.flat_cube = self.read_primary_cube(path_to_flat_cube,rest_value=rest_value)
        
-       pb,hdr,_= self.read_in_a_cube(path_to_pb)
+       pb,hdr,_= self.read_in_a_cube(path_to_pb,rest_value=rest_value)
        if self.flipped: pb=np.flip(pb,axis=2)
        
        self.pbcorr_cube = self.flat_cube.copy()*0.0
@@ -151,25 +156,25 @@ class pymakeplots:
        
 
 
-    def input_cube_nopb(self,path_to_cube):
+    def input_cube_nopb(self,path_to_cube,rest_value=None):
        
-       self.pbcorr_cube = self.read_primary_cube(path_to_cube) 
+       self.pbcorr_cube = self.read_primary_cube(path_to_cube,rest_value=rest_value) 
        
        self.flat_cube = self.pbcorr_cube
        
 
 
-    def input_cube_pbcorr_and_flat(self,path_to_pbcorr_cube,path_to_flat_cube):
+    def input_cube_pbcorr_and_flat(self,path_to_pbcorr_cube,path_to_flat_cube,rest_value=None):
        
-       self.pbcorr_cube = self.read_primary_cube(path_to_pbcorr_cube) 
+       self.pbcorr_cube = self.read_primary_cube(path_to_pbcorr_cube,rest_value=rest_value) 
        
-       self.flat_cube,hdr,_ = self.read_in_a_cube(path_to_flat_cube)
+       self.flat_cube,hdr,_ = self.read_in_a_cube(path_to_flat_cube,rest_value=rest_value)
+       
        if self.flipped: self.flat_cube=np.flip(self.flat_cube,axis=2)
            
     def smooth_mask(self,cube):
         """
         Apply a Gaussian blur, using sigma = 4 in the velocity direction (seems to work best), to the uncorrected cube.
-        The mode 'nearest' seems to give the best results.
         :return: (ndarray) mask to apply to the un-clipped cube
         """
         sigma = 1.5 * self.bmaj / self.cellsize
@@ -178,9 +183,14 @@ class pymakeplots:
         self.cliplevel=self.rms*self.rmsfac 
         self.maskcliplevel=newrms*self.rmsfac   
         mask=(smooth_cube > self.maskcliplevel)
-        # print("Clip level:",((3e20*1.6014457E-20*91.9)/(self.bmaj*self.bmin))*self.cliplevel*self.dv)
-        # import ipdb
-        # ipdb.set_trace()
+        
+        if self.suppress_subbeam_artifacts:
+            label,cnt=ndimage.label(mask)#.sum(axis=2))
+            hist,lab=np.histogram(label,bins=np.arange(cnt+1))
+            beampix=(self.bmaj*self.bmin)/(self.cellsize**2)
+            for thelabel in lab[0:-1][hist<(beampix*self.suppress_subbeam_artifacts)]:
+                mask[label == thelabel]=False
+        
         return mask      
 
 
@@ -322,34 +332,37 @@ class pymakeplots:
             
         return x1,y1,v1,np.abs(cd1),cd3                    
         
-    def read_in_a_cube(self,path):
-        self.spectralcube=SpectralCube.read(path).with_spectral_unit(u.km/u.s, velocity_convention='radio')#, rest_value=self.restfreq)
+    def read_in_a_cube(self,path,rest_value=None,primary=False):
+        
+        scube=SpectralCube.read(path).with_spectral_unit(u.km/u.s, velocity_convention='radio',rest_value=rest_value)
 
-        hdr=self.spectralcube.header
-        cube = np.squeeze(self.spectralcube.filled_data[:,:,:].T).value #squeeze to remove singular stokes axis if present
+        hdr=scube.header
+        cube = np.squeeze(scube.filled_data[:,:,:].T).value #squeeze to remove singular stokes axis if present
         cube[np.isfinite(cube) == False] = 0.0
         try:
-            beamtab=self.spectralcube.beam
+            beamtab=scube.beam
         except:
             try:
-                beamtab=self.spectralcube.beams[np.floor(self.spectralcube.beams.size/2).astype(int)]
+                beamtab=scube.beams[np.floor(scube.beams.size/2).astype(int)]
             except:
             #try flipping them
                 try:
-                    beamvals=[self.spectralcube.header['bmaj'],self.spectralcube.header['bmin']]
+                    beamvals=[scube.header['bmaj'],scube.header['bmin']]
                     beamtab=Beam(major=np.max(beamvals)*u.deg,minor=np.min(beamvals)*u.deg,pa=self.spectralcube.header['bpa']*u.deg)
                 except:
-                    beamtab=False
-        self.repfreq=np.median(self.spectralcube.with_spectral_unit(u.GHz).spectral_axis)  
+                    beamtab=False           
+        if primary:
+            self.spectralcube=scube
+            self.repfreq=np.median(self.spectralcube.with_spectral_unit(u.GHz).spectral_axis)
         return cube, hdr, beamtab
     
 
         
-    def read_primary_cube(self,cube):
+    def read_primary_cube(self,cube,rest_value=None):
         
         ### read in cube ###
-        datacube,hdr,beam = self.read_in_a_cube(cube)
-        
+        datacube,hdr,beam = self.read_in_a_cube(cube,rest_value=rest_value,primary=True)
+    
         self.bmaj=beam.major.to(u.arcsec).value
         self.bmin=beam.minor.to(u.arcsec).value
         self.bpa=beam.pa.value
@@ -359,15 +372,9 @@ class pymakeplots:
             self.galname=hdr['OBJECT']
         except:
             self.galname="Galaxy"
-            
-        
-                          
+         
         self.xcoord,self.ycoord,self.vcoord,self.cellsize,self.dv = self.get_header_coord_arrays(hdr)
-        #breakpoint()
-        
-        
 
-        
         if self.dv < 0:
             datacube = np.flip(datacube,axis=2)
             self.dv*=(-1)
@@ -475,7 +482,6 @@ class pymakeplots:
         y2 =  s*xpv + c*ypv
         ax2.scatter(0,0,facecolors='none',edgecolors='k')
         ax2.plot(x2,y2,'k--')
-        #breakpoint()
 
         ###### make summary box
         
@@ -503,6 +509,7 @@ class pymakeplots:
 
         if pdf:
             plt.savefig(self.galname+"_allplots.pdf", bbox_inches = 'tight')
+            plt.close()
         else:
             plt.show()
 
@@ -586,19 +593,27 @@ class pymakeplots:
         
         
         
-        if self.chans2do == None:
-            # use the mask to try and guess the channels with signal.
-            mask_cumsum=np.nancumsum((self.pbcorr_cube > self.rmsfac*self.rms).sum(axis=0).sum(axis=0))
-            w_low,=np.where(mask_cumsum/np.max(mask_cumsum) < 0.02)
-            w_high,=np.where(mask_cumsum/np.max(mask_cumsum) > 0.98)
+        if np.any(self.chans2do == None):
             
-            if w_low.size ==0: w_low=np.array([0])
-            if w_high.size ==0: w_high=np.array([self.vcoord.size])
-            self.chans2do=[np.clip(np.max(w_low)-2,0,self.vcoord.size),np.clip(np.min(w_high)+2,0,self.vcoord.size)]
-    
+            clip=4.0
+            vwidth=4000
+            while vwidth > 1500:
+                clip+=0.1        
+                # use the mask to try and guess the channels with signal.
+                mask_cumsum=np.nancumsum((self.cube_for_param_guesses > clip*self.rms).sum(axis=0).sum(axis=0))
+                w_low,=np.where(mask_cumsum/np.nanmax(mask_cumsum) < 0.05)
+                w_high,=np.where(mask_cumsum/np.nanmax(mask_cumsum) > 0.95)
+            
+                if w_low.size ==0: w_low=np.array([0])
+                if w_high.size ==0: w_high=np.array([self.vcoord.size])
+                #breakpoint()
+                self.chans2do=[np.clip(np.max(w_low)-7,0,self.vcoord.size-1),np.clip(np.min(w_high)+7,0,self.vcoord.size-1)]
+                vwidth=self.vcoord[self.chans2do[1]]-self.vcoord[self.chans2do[0]]
+            #print(clip)    
+                
         if self.vsys == None:
             # use the cube to try and guess the vsys
-            self.vsys=((self.pbcorr_cube*(self.pbcorr_cube > self.rmsfac*self.rms)).sum(axis=0).sum(axis=0)*self.vcoord).sum()/((self.pbcorr_cube*(self.pbcorr_cube > self.rmsfac*self.rms)).sum(axis=0).sum(axis=0)).sum()
+            self.vsys=((self.cube_for_param_guesses*(self.cube_for_param_guesses > self.rmsfac*self.rms)).sum(axis=0).sum(axis=0)*self.vcoord).sum()/((self.cube_for_param_guesses*(self.cube_for_param_guesses > self.rmsfac*self.rms)).sum(axis=0).sum(axis=0)).sum()
         
         if self.imagesize != None:
             if np.array(self.imagesize).size == 1:
@@ -612,7 +627,7 @@ class pymakeplots:
         
         if self.spatial_trim == None:
             
-            mom0=(self.pbcorr_cube > self.rmsfac*self.rms).sum(axis=2)
+            mom0=(self.cube_for_param_guesses > self.rmsfac*self.rms).sum(axis=2)
             mom0[mom0>0]=1
             
             cumulative_x = np.nancumsum(mom0.sum(axis=1),dtype=float)
@@ -662,19 +677,16 @@ class pymakeplots:
         return cb         
             
         
-    def add_beam(self,ax):    
+    def add_beam(self,ax):
+        aux_tr_box = AuxTransformBox(ax.transData)
+                
         if self.all_axes_physical:
-            ae = AnchoredEllipse(ax.transData, width=self.ang2kpctrans(self.bmaj), height=self.ang2kpctrans(self.bmin), angle=self.bpa+90,
-                             loc='lower left', pad=0.5, borderpad=0.4,
-                             frameon=False)
+            aux_tr_box.add_artist(Ellipse((0, 0), width=self.ang2kpctrans(self.bmaj), height=self.ang2kpctrans(self.bmin), angle=self.bpa+90,edgecolor='black',facecolor='none',linewidth=1.5))                 
         else:
-            ae = AnchoredEllipse(ax.transData, width=self.bmaj, height=self.bmin, angle=self.bpa+90,
-                             loc='lower left', pad=0.5, borderpad=0.4,
-                             frameon=False)                   
-        ae.ellipse.set_edgecolor('black')
-        ae.ellipse.set_facecolor('none')
-        ae.ellipse.set_linewidth(1.5)
-        ax.add_artist(ae)
+            aux_tr_box.add_artist(Ellipse((0, 0), width=self.bmaj, height=self.bmin, angle=self.bpa+90,edgecolor='black',facecolor='none',linewidth=1.5))                 
+        box = AnchoredOffsetbox(child=aux_tr_box, loc='lower left', pad=0.5, borderpad=0.4,frameon=False)
+        ax.add_artist(box)                     
+
         
             
         
@@ -819,12 +831,13 @@ class pymakeplots:
                     mom2[i,j]=np.sqrt(np.sum(np.abs(self.pbcorr_cube_trim[i,j,:]*self.mask_trim[i,j,:]) * (self.vcoord_trim - mom1[i,j]) ** 2, axis=0) / np.sum(abs(self.pbcorr_cube_trim[i,j]*self.mask_trim[i,j,:]), axis=0))
         
         if self.maxvdisp == None:
-            self.maxvdisp=np.ceil(np.clip(np.nanstd(mom2)*4,0,np.nanmax(mom2))/10.)*10.
-        
-        
-        
+            self.maxvdisp=np.ceil(np.clip(np.nanstd(mom2)*4,20,np.nanmax(mom2))/10.)*10.
+        else:
+            self.maxvdisp=np.ceil(np.clip(np.nanstd(mom2)*4,20,self.maxvdisp)/10.)*10.
+        if np.isfinite(self.maxvdisp)==False:
+            self.maxvdisp=50.
+        #breakpoint()
         mom2levs=np.linspace(0,self.maxvdisp,10)
-        
         im1=ax1.contourf(self.xc,self.yc,mom2.T,levels=mom2levs,cmap=sauron,vmax=self.maxvdisp)
         
         if self.all_axes_physical:
@@ -844,7 +857,7 @@ class pymakeplots:
         vticks=np.arange(0,5)*dvticks
         
         cb=self.colorbar(im1,ticks=vticks)
-        cb.set_label("$\sigma_{obs}$ (km s$^{-1}$)")
+        cb.set_label('$\\sigma_{obs}$ (km s$^{-1}$)')
 
         
         self.add_beam(ax1)
@@ -969,32 +982,67 @@ class pymakeplots:
         if self.posang==None:
             # try fitting the moment one to get the kinematic pa
             if not self.silent: print("No position angle given, estimating using the observed moment one.")
-            mom0=(self.pbcorr_cube_trim*self.mask_trim).sum(axis=2)
+            mom0=(self.flat_cube_trim*self.mask_trim).sum(axis=2)
             mom1=mom0.copy()*np.nan
-            mom1[mom0 != 0.0] = (((self.pbcorr_cube_trim*self.mask_trim)*self.vcoord_trim).sum(axis=2))[mom0 != 0.0]/mom0[mom0 != 0.0]
-            mom1=mom1.T
+            mom1[mom0 != 0.0] = (((self.flat_cube_trim*self.mask_trim)*self.vcoord_trim).sum(axis=2))[mom0 != 0.0]/mom0[mom0 != 0.0]
+            mom1=mom1.T 
             
-
+            # ### sigma clip
+            # mom1[np.abs(mom1/np.nanstd(mom1))>5]=np.nan
+            
+            ### select largest contigious structure
+            label,cnt=ndimage.label(self.mask_trim.sum(axis=2))
+            mode_label= mode(label[label>0])
+            
+            hist,lab=np.histogram(label[label>0],bins=np.arange(cnt+1)+1)
+            beampix=(self.bmaj*self.bmin)/(self.cellsize**2)
+            
+            
+            if len(lab[0:-1][hist<beampix]) != len(lab[0:-1]):
+                
+                ## remove beam size artifacts
+                for thelabel in lab[0:-1][hist<beampix]:
+                    mom1[label.T ==  thelabel]=np.nan
+                  
+                ## keep biggest structures that contain >80% of remaining pixels
+                remainlab=lab[0:-1][hist>beampix]  
+                remainhist=hist[hist>beampix]
+                st=np.argsort(remainhist)    
+                for thelabel in remainlab[st][np.nancumsum(remainhist[st]/np.sum(remainhist)) < 0.2]:
+                    mom1[label.T ==  thelabel]=np.nan 
+                    
+            else:    
+                mom1[label.T != mode_label.mode]=np.nan
+            
+            #self.useallpixels=True
+            
+            ### remove median
+            mom1-=np.nanmedian(mom1)
+            
+            
+            
+            #breakpoint()
             # if the cube is small, use it directly to estimate posang. If its large, then interpolate down to keep runtime low.
-            if (self.pbcorr_cube_trim[:,:,0].size < 50*50) or (self.useallpixels):
-                xv, yv = np.meshgrid(self.xc,self.yc)
-                x,y,v = xv[np.isfinite(mom1)],yv[np.isfinite(mom1)],mom1[np.isfinite(mom1)]
-            else:
-                print("Downsampling the observed moment one in PA estimate for speed. Set `useallpixels` to override.")    
-                mom1[np.isfinite(mom1) == False] = self.vsys
-                #breakpoint()
-                interper = interpolate.RegularGridInterpolator((self.xc,self.yc),(mom1-self.vsys).T,bounds_error=False,fill_value=np.nan)
-                x=np.linspace(np.min(self.xc),np.max(self.xc),50)
-                y=np.linspace(np.min(self.yc),np.max(self.yc),50)
-                xv, yv = np.meshgrid(x,y)
-                v= interper((xv,yv))
-                x,y,v = xv.flatten(),yv.flatten(),v.flatten()
-               
-            self.posang,_,_ = fit_kinematic_pa(x[np.isfinite(v)],y[np.isfinite(v)],v[np.isfinite(v)],nsteps=36,plot=False,quiet=True)
+            # if (self.pbcorr_cube_trim[:,:,0].size < 50*50) or (self.useallpixels):
+            xv, yv = np.meshgrid(self.xc,self.yc)
+            x,y,v = xv[np.isfinite(mom1)],yv[np.isfinite(mom1)],mom1[np.isfinite(mom1)]
+            # else:
+            #     print("Downsampling the observed moment one in PA estimate for speed. Set `useallpixels` to override.")
+            #mom1[np.isfinite(mom1) == False] = self.vsys
+            #breakpoint()
+            # interper = interpolate.RegularGridInterpolator((self.xc,self.yc),(mom1-self.vsys).T,bounds_error=False,fill_value=np.nan)
+            # x=np.linspace(np.min(self.xc),np.max(self.xc),self.xc.size//2)
+            # y=np.linspace(np.min(self.yc),np.max(self.yc),self.yc.size//2)
+            # xv, yv = np.meshgrid(x,y)
+            # v= interper((xv,yv))
+            # x,y,v = xv.flatten(),yv.flatten(),v.flatten()
             
+            #breakpoint()
+            self.posang,_,_ = fit_kinematic_pa(x[np.isfinite(v)],y[np.isfinite(v)],v[np.isfinite(v)],nsteps=36,plot=False,quiet=True)
+
             if np.sin(np.deg2rad((self.posang+45)*2)) > 0:
                 # do y axis cut
-                if np.nanmean(mom1[self.yc > 0,:]) > np.nanmean(mom1[self.yc < 0,:]):
+                if np.nansum(mom1[self.yc > 0,:])/(mom1[self.yc > 0,:]).size > np.nansum(mom1[self.yc < 0,:])/(mom1[self.yc < 0,:]).size:
                     # posang should be gt 180
                     if self.posang < 180: self.posang += 180
                 else:
@@ -1002,15 +1050,14 @@ class pymakeplots:
                     if self.posang > 180: self.posang -= 180    
             else:
                 # do x axis cut
-                if np.nanmean(mom1[:,self.xc > 0]) > np.nanmean(mom1[:,self.xc < 0]):
+                if np.nansum(mom1[:,self.xc > 0])/(mom1[:,self.xc > 0]).size > np.nansum(mom1[:,self.xc < 0])/(mom1[:,self.xc < 0]).size:
                     # posang should be gt 180
                     if self.posang < 180: self.posang += 180
                 else:
                      # posang should be lt 180
                     if self.posang > 180: self.posang -= 180
             if not self.silent: print("PA estimate (degrees): ",np.round(self.posang,1))        
-        
-                    
+
         centpix_x=np.where(np.isclose(self.xc,0.0,atol=self.cellsize/1.9))[0]
         centpix_y=np.where(np.isclose(self.yc,0.0,atol=self.cellsize/1.9))[0]
         
@@ -1047,9 +1094,15 @@ class pymakeplots:
         newcmp = ListedColormap(oldcmp(np.linspace(0.15, 1, 256)))
         
 
+        if np.nanmax(pvd) < self.cliplevel:
+            contour_levels=np.linspace(np.nanmax(pvd)/2.,np.nanmax(pvd),10)
+            if np.sum(contour_levels)==0:
+                contour_levels=np.array([self.cliplevel,self.cliplevel+0.1])
+        else:
+            contour_levels=np.linspace(self.cliplevel,np.nanmax(pvd),10)
         
-        axes.contourf(pvdaxis,vaxis,pvd.T,levels=np.linspace(self.cliplevel,np.nanmax(pvd),10),cmap=newcmp)
-        axes.contour(pvdaxis,vaxis,pvd.T,levels=np.linspace(self.cliplevel,np.nanmax(pvd),10),colors='black')
+        axes.contourf(pvdaxis,vaxis,pvd.T,levels=contour_levels,cmap=newcmp)
+        axes.contour(pvdaxis,vaxis,pvd.T,levels=contour_levels,colors='black')
         
         if self.all_axes_physical:
              axes.set_xlabel('Offset (kpc)')
@@ -1067,7 +1120,7 @@ class pymakeplots:
         secax = axes.secondary_yaxis('right', functions=(self.vsystrans, self.vsystrans_inv))
         secax.set_ylabel(r'V$_{\rm offset}$ (km s$^{-1}$)')
 
-        anchored_text = AnchoredText("PA: "+str(round(self.posang,1))+"$^{\circ}$", loc=loc1,frameon=False)
+        anchored_text = AnchoredText("PA: "+str(round(self.posang,1))+'$^{\\circ}$', loc=loc1,frameon=False)
         axes.add_artist(anchored_text)
         
         if self.gal_distance != None and not self.all_axes_physical:
@@ -1078,6 +1131,7 @@ class pymakeplots:
         
         if pdf:
             plt.savefig(self.galname+"_pvd.pdf", bbox_inches = 'tight')
+            plt.close()
         else:
             if not outsideaxis: plt.show()
     
@@ -1149,6 +1203,7 @@ class pymakeplots:
         
         if pdf:
             plt.savefig(self.galname+"_spec.pdf", bbox_inches = 'tight')
+            plt.close()
         else:
             if not outsideaxis: plt.show()
         
