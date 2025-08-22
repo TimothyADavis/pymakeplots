@@ -40,7 +40,7 @@ def rotateImage(img, angle, pivot):
 
 
 class pymakeplots:
-    def __init__(self,cube_flat=None,pb=None,cube=None,rest_value=None):
+    def __init__(self,cube_flat=None,pb=None,cube=None,rest_value=None,velocity_convention='radio'):
         self.galname=None
         self.gal_distance=None
         self.posang=None
@@ -58,6 +58,7 @@ class pymakeplots:
         self.pbcorr_cube_trim=None
         self.mask_trim=None
         self.bmaj=None
+        self.smoothmask_spatial=1.5
         self.bmin=None
         self.bpa=None
         self.xcoord,self.ycoord,self.vcoord = None, None, None
@@ -67,6 +68,7 @@ class pymakeplots:
         self.silent=False # rig for silent running if true
         self.bardist=None
         self.rmsfac=3
+        self.velocity_convention=velocity_convention
         self.restfreq=None
         self.repfreq=None
         self.obj_ra=None
@@ -103,7 +105,7 @@ class pymakeplots:
         
         if (cube_flat != None)&(pb!=None):
             # flat cube and pb given
-            if np.any(self.pbcorr_cube) == None: #check if the user gave all three cubes, in which case this call is redundant
+            if np.any(self.pbcorr_cube == None): #check if the user gave all three cubes, in which case this call is redundant
                 self.input_cube_flat(cube_flat,pb,rest_value=rest_value)  
               
         if (cube != None)&(pb==None)&(cube_flat!=None):
@@ -177,7 +179,7 @@ class pymakeplots:
         Apply a Gaussian blur, using sigma = 4 in the velocity direction (seems to work best), to the uncorrected cube.
         :return: (ndarray) mask to apply to the un-clipped cube
         """
-        sigma = 1.5 * self.bmaj / self.cellsize
+        sigma = self.smoothmask_spatial * self.bmaj / self.cellsize
         smooth_cube = ndimage.uniform_filter(cube, size=[sigma, sigma,4], mode='constant')  # mode='nearest'
         newrms= self.rms_estimate(smooth_cube,0,1) 
         self.cliplevel=self.rms*self.rmsfac 
@@ -334,7 +336,7 @@ class pymakeplots:
         
     def read_in_a_cube(self,path,rest_value=None,primary=False):
         
-        scube=SpectralCube.read(path).with_spectral_unit(u.km/u.s, velocity_convention='radio',rest_value=rest_value)
+        scube=SpectralCube.read(path).with_spectral_unit(u.km/u.s, velocity_convention=self.velocity_convention,rest_value=rest_value)
 
         hdr=scube.header
         cube = np.squeeze(scube.filled_data[:,:,:].T).value #squeeze to remove singular stokes axis if present
@@ -519,14 +521,14 @@ class pymakeplots:
     def make_moments(self,axes=None,mom=[0,1,2],pdf=False,fits=False):
         mom=np.array(mom)
         self.fits=fits
-        
-        if np.any(self.xc) == None:
+
+        if np.any(self.xc == None):
             self.prepare_cubes()
         
         self.set_rc_params()
        
         nplots=mom.size
-        if np.any(axes) == None:
+        if np.any(axes == None):
             if self.make_square:
                 fig,axes=plt.subplots(1,nplots,sharey=True,figsize=(7*nplots,7), gridspec_kw = {'wspace':0, 'hspace':0})
             else:
@@ -968,10 +970,10 @@ class pymakeplots:
             
     def make_pvd(self,axes=None,fits=False,pdf=False):
         self.fits=fits
-        if np.any(self.xc) == None:
+        if np.any(self.xc == None):
             self.prepare_cubes()
         
-        if np.any(axes) == None:    
+        if np.any(axes == None):    
             self.set_rc_params(mult=0.75)   
             fig,axes=plt.subplots(1,figsize=(7,5))
             outsideaxis=0
@@ -1137,19 +1139,25 @@ class pymakeplots:
     
     def make_spec(self,axes=None,fits=False,pdf=False,onlydata=False,nsum=False,highlight=False):
         self.fits=fits
-        if np.any(self.xc) == None:
+        if np.any(self.xc == None):
             self.prepare_cubes()
         
-        if axes == None:    
+        if np.any(axes == None):    
             self.set_rc_params(mult=0.75)   
             fig,axes=plt.subplots(1,figsize=(7,5))
             outsideaxis=0
         else:
             outsideaxis=1
-        spec=self.pbcorr_cube[self.spatial_trim[0]:self.spatial_trim[1],self.spatial_trim[2]:self.spatial_trim[3],:].sum(axis=0).sum(axis=0)
+            #spec=self.pbcorr_cube[self.spatial_trim[0]:self.spatial_trim[1],self.spatial_trim[2]:self.spatial_trim[3],:].sum(axis=0).sum(axis=0)
+        
+        mask2d=self.mask_trim.sum(axis=2).reshape((self.mask_trim.shape[0],self.mask_trim.shape[1],1)).astype(bool)
+        mask2d=ndimage.binary_dilation(mask2d,iterations=2)
+        spec=(self.pbcorr_cube[self.spatial_trim[0]:self.spatial_trim[1],self.spatial_trim[2]:self.spatial_trim[3],:]*mask2d).sum(axis=0).sum(axis=0)
+        
+
         spec_mask=(self.pbcorr_cube_trim*self.mask_trim).sum(axis=0).sum(axis=0)
         ylab="Unknown"
-        #breakpoint()
+        
         if (''.join(self.bunit.split())).lower() == "Jy/beam".lower():
             
             spec*=1/self.beam_area()
