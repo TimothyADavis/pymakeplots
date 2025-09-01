@@ -9,11 +9,11 @@ import matplotlib.pyplot as plt
 import matplotlib
 from pymakeplots.sauron_colormap import sauron
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from matplotlib.patches import Ellipse,Rectangle
+from matplotlib.patches import Ellipse,Rectangle, Arrow
 from matplotlib import cm
 from matplotlib.colors import ListedColormap, LinearSegmentedColormap
 from matplotlib.offsetbox import AnchoredText,AuxTransformBox, AnchoredOffsetbox
-from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
+from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar,AnchoredDirectionArrows
 from astropy.coordinates import ICRS
 import matplotlib.gridspec as gridspec
 from astropy.table import Table
@@ -40,7 +40,7 @@ def rotateImage(img, angle, pivot):
 
 
 class pymakeplots:
-    def __init__(self,cube_flat=None,pb=None,cube=None,rest_value=None,velocity_convention='radio'):
+    def __init__(self,cube_flat=None,pb=None,cube=None,rest_value=None,velocity_convention='radio',rotate=None):
         self.galname=None
         self.gal_distance=None
         self.posang=None
@@ -58,6 +58,7 @@ class pymakeplots:
         self.pbcorr_cube_trim=None
         self.mask_trim=None
         self.bmaj=None
+        self.rotate=rotate
         self.smoothmask_spatial=1.5
         self.bmin=None
         self.bpa=None
@@ -93,6 +94,8 @@ class pymakeplots:
         self.make_square=True
         self.useallpixels = False
         self.suppress_subbeam_artifacts=False
+        self.mom1_cmap=sauron
+        self.mom2_cmap=sauron
         #self.wcs=None
         
         if (cube != None)&(pb==None)&(cube_flat==None):
@@ -322,21 +325,43 @@ class pymakeplots:
     def get_header_coord_arrays(self,hdr):
         
             
-        cd1=self.spectralcube.wcs.pixel_scale_matrix[0,0]*3600
-        cd2=self.spectralcube.wcs.pixel_scale_matrix[1,1]*3600
-        x1=((np.arange(1,hdr['NAXIS1']+1)-(hdr['NAXIS1']//2))*cd1)# + hdr['CRVAL1']
+        cd1=self.spectralcube.header['CDELT1']*3600.
+        cd2=self.spectralcube.header['CDELT2']*3600.
+        x1=((np.arange(1,hdr['NAXIS1']+1)-(hdr['NAXIS1']//2))*(cd1))# + hdr['CRVAL1']
         y1=((np.arange(1,hdr['NAXIS2']+1)-(hdr['NAXIS1']//2))*cd2)# + hdr['CRVAL2']
 
         v1=self.spectralcube.spectral_axis.value
 
         cd3= np.median(np.diff(v1))
-       
+        #breakpoint()
             
         return x1,y1,v1,np.abs(cd1),cd3                    
         
     def read_in_a_cube(self,path,rest_value=None,primary=False):
         
+        if self.rotate !=None:
+            try:
+                h=fits.getheader(path.split('.fits')[0]+'_rotated.fits')
+                if float(h['ROTANGLE']) == self.rotate:
+                    path=path.split('.fits')[0]+'_rotated.fits'
+                    alreadyrotated=True
+                else:
+                    alreadyrotated=False
+            except:
+                alreadyrotated=False    
+                
+                
         scube=SpectralCube.read(path).with_spectral_unit(u.km/u.s, velocity_convention=self.velocity_convention,rest_value=rest_value)
+
+        hdr=scube.header
+        
+        if self.rotate !=None:
+            if alreadyrotated == False:
+                hdr['CROTA2']=self.rotate
+                hdr['CROTA3']=0
+                scube=scube.reproject(hdr)
+                scube.meta['ROTANGLE']=self.rotate
+                scube.write(path.split('.fits')[0]+'_rotated.fits',overwrite=True)
 
         hdr=scube.header
         cube = np.squeeze(scube.filled_data[:,:,:].T).value #squeeze to remove singular stokes axis if present
@@ -396,7 +421,6 @@ class pymakeplots:
         return xpix,ypix,xoffsetarc,yoffsetarc
         
     def prepare_cubes(self):
-        
         self.centskycoord=self.spectralcube.wcs.celestial.pixel_to_world(self.xcoord.size//2,self.ycoord.size//2).transform_to('icrs')
         self.x_skycent=self.centskycoord.ra.value
         self.y_skycent=self.centskycoord.dec.value
@@ -415,10 +439,10 @@ class pymakeplots:
             pointingposes=SkyCoord(self.pointingsra,self.pointingsdec,frame='icrs',unit=(u.hourangle,u.deg))
             _,_,pointoffsetx,pointoffsety=self.calc_offset(pointingposes.ra,pointingposes.dec)
             self.points2plot=np.zeros((len(pointoffsetx),3))
-            self.points2plot[:,0]=pointoffsetx-xoffsetarc
+            self.points2plot[:,0]=-pointoffsetx+xoffsetarc
             self.points2plot[:,1]=pointoffsety-yoffsetarc
             self.points2plot[:,2]=self.pointingsdiam.value
-        
+            #breakpoint()
         self.clip_cube(xoffsetarc,yoffsetarc)
             
         self.mask_trim=self.smooth_mask(self.flat_cube_trim)
@@ -563,7 +587,7 @@ class pymakeplots:
                 plt.show()
                 plt.close()
     
-    def scalebar(self,ax,loc='lower right'):
+    def scalebarlength(self):
         barlength_pc = np.ceil((np.abs(self.xc[-1]-self.xc[0])*4.84*self.gal_distance)/1000.)*100
         barlength_arc=  barlength_pc/(4.84*self.gal_distance)
         
@@ -576,7 +600,11 @@ class pymakeplots:
             barlength_arc=  barlength_pc/(4.84*self.gal_distance)
             
             
+        return barlength_arc,barlength_pc
+    
+    def scalebar(self,ax,loc='lower right'):
         
+        barlength_arc,barlength_pc=self.scalebarlength()
         if np.log10(barlength_pc) > 3:
             label=(barlength_pc/1e3).astype(str)+ " kpc"
         else:
@@ -590,9 +618,6 @@ class pymakeplots:
         
             
     def clip_cube(self,xoffsetarc,yoffsetarc):
-        
-        #
-        
         
         
         if np.any(self.chans2do == None):
@@ -621,7 +646,6 @@ class pymakeplots:
             if np.array(self.imagesize).size == 1:
                 self.imagesize=[self.imagesize,self.imagesize]
             
-
             wx,=np.where(np.abs(self.xcoord-xoffsetarc) <= self.imagesize[0])
             wy,=np.where(np.abs(self.ycoord-yoffsetarc) <= self.imagesize[1])
             self.spatial_trim=[np.min(wx),np.max(wx),np.min(wy),np.max(wy)]  
@@ -690,8 +714,67 @@ class pymakeplots:
         ax.add_artist(box)                     
 
         
-            
+    def add_axis_labels(self,ax1,first=True):
+        if self.rotate !=None:
+            self._xlab='Offset'
+            self._ylab='Offset'
+        else:        
+            self._xlab='RA Offset'
+            self._ylab='Dec Offset'
+                
+        if self.all_axes_physical:
+            ax1.set_xlabel(self._xlab+' (kpc)')
+            if first: ax1.set_ylabel(self._ylab+' (kpc)')
+        else:
+            ax1.set_xlabel(self._xlab+' (")')
+            if first: ax1.set_ylabel(self._ylab+' (")')
+    
+    def add_arrow(self,ax,first=True,last=True):
+        if first and last:
+            loc='upper right'
+        else:
+            loc="lower right"
+        # if self.all_axes_physical:
+        #     length2use=self.ang2kpctrans(self.bmaj)
+        # else:
+        #     length2use=self.bmaj
+        #
+        # rotated_arrow = AnchoredDirectionArrows(
+        #                     ax.transData,
+        #                     'Dec', 'RA',
+        #                     loc=loc,
+        #                     length=-0.1,#length2use*2,
+        #                     aspect_ratio=-1,
+        #                     color='k',
+        #                     text_props={'ec': 'k', 'fc': 'k'},
+        #                     angle=self.rotate,
+        #                     )
+        # ax.add_artist(rotated_arrow)
         
+        
+        aux_tr_box = AuxTransformBox(ax.transData)
+        barlength_arc,barlength_pc=self.scalebarlength()
+        if self.all_axes_physical:
+            length2use=self.ang2kpctrans(barlength_arc)
+        else:
+            length2use=barlength_arc
+
+        rotmat=np.array([[np.cos(np.deg2rad(self.rotate)),-np.sin(np.deg2rad(self.rotate))],[np.sin(np.deg2rad(self.rotate)),np.cos(np.deg2rad(self.rotate))]])
+        dx1,dx2=np.dot(rotmat,np.array([0,length2use]))
+        aux_tr_box.add_artist(Arrow(0, 0,dx1,dx2,color='k'))
+        box = AnchoredOffsetbox(child=aux_tr_box, loc=loc, frameon=False)
+        ax.add_artist(box)
+        #ax.text(3, y + 0.05, bracketstyle, ha="center", va="bottom", fontsize=14)   
+    
+    def add_second_axis(self,ax1):                  
+        if np.log10(self.ang2pctrans(np.max([np.max(self.xc),np.max(self.yc)]))) > 3:
+            secax = ax1.secondary_yaxis('right', functions=(self.ang2kpctrans, self.ang2kpctrans_inv))
+            secax.set_ylabel(self._ylab+' (kpc)')
+        else:
+            secax = ax1.secondary_yaxis('right', functions=(self.ang2pctrans, self.ang2pctrans_inv))
+            secax.set_ylabel(self._ylab+' (pc)')
+            
+            
     def mom0(self,ax1,first=True,last=True):
         mom0=(self.pbcorr_cube_trim*self.mask_trim).sum(axis=2)*self.dv
         
@@ -714,17 +797,10 @@ class pymakeplots:
         #breakpoint() 
         im1=ax1.contourf(self.xc,self.yc,mom0.T,levels=levs,cmap=newcmp)
         #im1=ax1.pcolormesh(self.xc,self.yc,mom0.T,cmap=newcmp,vmin=minmom0,vmax=maxmom0)
+        
             
-        if self.all_axes_physical:
-            ax1.set_xlabel('RA offset (kpc)')
-            if first: ax1.set_ylabel('Dec offset (kpc)')
-        else:
-            ax1.set_xlabel('RA offset (")')
-            if first: ax1.set_ylabel('Dec offset (")')
+        self.add_axis_labels(ax1,first=first)
         
-        
-        
-                
         
         if maxmom0 > 0:
                 vticks=np.linspace(0,(np.round((maxmom0 / 10**np.floor(np.log10(maxmom0))))*10**np.floor(np.log10(maxmom0))),4)
@@ -740,6 +816,8 @@ class pymakeplots:
             
             
         self.add_beam(ax1)
+        if self.rotate != None and first:
+            self.add_arrow(ax1,first=first,last=last)
         
         if np.any(self.points2plot != None):
             naca=0
@@ -766,15 +844,14 @@ class pymakeplots:
         if self.make_square:
             ax1.set_xlim(np.min([self.xc[0],self.yc[0]]),np.max([self.xc[-1],self.yc[-1]]))
             ax1.set_ylim(np.min([self.xc[0],self.yc[0]]),np.max([self.xc[-1],self.yc[-1]]))
+        else:
+            ax1.set_xlim(self.xc[0],self.xc[-1])
+            ax1.set_ylim(self.yc[0],self.yc[-1])    
         ax1.set_aspect('equal')
         
+        
         if last and not self.all_axes_physical:
-            if np.log10(self.ang2pctrans(np.max([np.max(self.xc),np.max(self.yc)]))) > 3:
-                secax = ax1.secondary_yaxis('right', functions=(self.ang2kpctrans, self.ang2kpctrans_inv))
-                secax.set_ylabel(r'Dec offset (kpc)')
-            else:
-                secax = ax1.secondary_yaxis('right', functions=(self.ang2pctrans, self.ang2pctrans_inv))
-                secax.set_ylabel(r'Dec offset (pc)')
+            self.add_second_axis(ax1)
             
         
         if self.fits:
@@ -790,14 +867,9 @@ class pymakeplots:
 
         vticks=np.linspace((-1)*np.ceil(np.max(np.abs(self.vcoord_trim-self.vsys))/10.)*10.,np.ceil(np.max(np.abs(self.vcoord_trim-self.vsys))/10.)*10.,5)
         
-        im1=ax1.contourf(self.xc,self.yc,mom1.T-self.vsys,levels=self.vcoord_trim-self.vsys,cmap=sauron,vmin=vticks[0],vmax=vticks[-1])
+        im1=ax1.contourf(self.xc,self.yc,mom1.T-self.vsys,levels=self.vcoord_trim-self.vsys,cmap=self.mom1_cmap,vmin=vticks[0],vmax=vticks[-1])
         
-        if self.all_axes_physical:
-            ax1.set_xlabel('RA offset (kpc)')
-            if first: ax1.set_ylabel('Dec offset (kpc)')
-        else:
-            ax1.set_xlabel('RA offset (")')
-            if first: ax1.set_ylabel('Dec offset (")')
+        self.add_axis_labels(ax1,first=first)
         
                 
         cb=self.colorbar(im1,ticks=vticks)
@@ -808,14 +880,15 @@ class pymakeplots:
         if self.make_square:
             ax1.set_xlim(np.min([self.xc[0],self.yc[0]]),np.max([self.xc[-1],self.yc[-1]]))
             ax1.set_ylim(np.min([self.xc[0],self.yc[0]]),np.max([self.xc[-1],self.yc[-1]]))
-        
+        else:
+            ax1.set_xlim(self.xc[0],self.xc[-1])
+            ax1.set_ylim(self.yc[0],self.yc[-1])
+            
+        if self.rotate != None and first:
+            self.add_arrow(ax1,first=first,last=last)
+             
         if last and not self.all_axes_physical:
-            if np.log10(self.ang2pctrans(np.max([np.max(self.xc),np.max(self.yc)]))) > 3:
-                secax = ax1.secondary_yaxis('right', functions=(self.ang2kpctrans, self.ang2kpctrans_inv))
-                secax.set_ylabel(r'Dec offset (kpc)')
-            else:
-                secax = ax1.secondary_yaxis('right', functions=(self.ang2pctrans, self.ang2pctrans_inv))
-                secax.set_ylabel(r'Dec offset (pc)')    
+            self.add_second_axis(ax1) 
             
         if self.fits:
             self.write_fits(mom1.T,1)
@@ -840,14 +913,9 @@ class pymakeplots:
             self.maxvdisp=50.
         #breakpoint()
         mom2levs=np.linspace(0,self.maxvdisp,10)
-        im1=ax1.contourf(self.xc,self.yc,mom2.T,levels=mom2levs,cmap=sauron,vmax=self.maxvdisp)
+        im1=ax1.contourf(self.xc,self.yc,mom2.T,levels=mom2levs,cmap=self.mom2_cmap,vmax=self.maxvdisp)
         
-        if self.all_axes_physical:
-            ax1.set_xlabel('RA offset (kpc)')
-            if first: ax1.set_ylabel('Dec offset (kpc)')
-        else:
-            ax1.set_xlabel('RA offset (")')
-            if first: ax1.set_ylabel('Dec offset (")')
+        self.add_axis_labels(ax1,first=first)
         
         if self.maxvdisp < 50:
             dvticks=10
@@ -868,14 +936,15 @@ class pymakeplots:
         if self.make_square:
             ax1.set_xlim(np.min([self.xc[0],self.yc[0]]),np.max([self.xc[-1],self.yc[-1]]))
             ax1.set_ylim(np.min([self.xc[0],self.yc[0]]),np.max([self.xc[-1],self.yc[-1]]))
+        else:
+            ax1.set_xlim(self.xc[0],self.xc[-1])
+            ax1.set_ylim(self.yc[0],self.yc[-1])
             
+        if self.rotate != None and first:
+            self.add_arrow(ax1,first=first,last=last)
+                    
         if last and not self.all_axes_physical:
-            if np.log10(self.ang2pctrans(np.max([np.max(self.xc),np.max(self.yc)]))) > 3.3:
-                secax = ax1.secondary_yaxis('right', functions=(self.ang2kpctrans, self.ang2kpctrans_inv))
-                secax.set_ylabel(r'Dec offset (kpc)')
-            else:
-                secax = ax1.secondary_yaxis('right', functions=(self.ang2pctrans, self.ang2pctrans_inv))
-                secax.set_ylabel(r'Dec offset (pc)',rotation=270,labelpad=10)
+            self.add_second_axis(ax1)
                 
                     
         if self.fits:
@@ -899,6 +968,12 @@ class pymakeplots:
         newhdu.header['CRPIX2']=self.spectralcube.header['CRPIX2']
         newhdu.header['CRVAL2']=self.spectralcube.header['CRVAL2']
         newhdu.header['CDELT2']=self.spectralcube.header['CDELT2']
+        if self.rotate!=None:
+            newhdu.header['PC1_1']=self.spectralcube.header['PC1_1']
+            newhdu.header['PC1_2']=self.spectralcube.header['PC1_2']
+            newhdu.header['PC2_1']=self.spectralcube.header['PC2_1']
+            newhdu.header['PC2_2']=self.spectralcube.header['PC2_2']
+            
         try:
             newhdu.header['PV2_1']=self.spectralcube.header['PV2_1']
             newhdu.header['PV2_2']=self.spectralcube.header['PV2_2']
@@ -1125,8 +1200,8 @@ class pymakeplots:
         anchored_text = AnchoredText("PA: "+str(round(self.posang,1))+'$^{\\circ}$', loc=loc1,frameon=False)
         axes.add_artist(anchored_text)
         
-        if self.gal_distance != None and not self.all_axes_physical:
-            self.scalebar(axes,loc=loc2)
+        #if self.gal_distance != None and not self.all_axes_physical:
+        #    self.scalebar(axes,loc=loc2)
 
         if self.fits:
             self.write_pvd_fits(pvdaxis,vaxis,pvd.T)
