@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
  
 setup(name='pymakeplots',
-       version='0.2.4',
+       version='0.2.5',
        description='',
        url='https://github.com/TimothyADavis/pymakeplots',
        author='Timothy A. Davis',

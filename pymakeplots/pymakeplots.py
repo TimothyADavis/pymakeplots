@@ -9,8 +9,9 @@ import matplotlib.pyplot as plt
 import matplotlib
 from pymakeplots.sauron_colormap import sauron
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from matplotlib.patches import Ellipse,Rectangle, Arrow
+from matplotlib.patches import Ellipse,Rectangle, Arrow, FancyArrowPatch
 from matplotlib import cm
+from matplotlib.text import Text
 from matplotlib.colors import ListedColormap, LinearSegmentedColormap
 from matplotlib.offsetbox import AnchoredText,AuxTransformBox, AnchoredOffsetbox
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar,AnchoredDirectionArrows
@@ -366,6 +367,7 @@ class pymakeplots:
         hdr=scube.header
         cube = np.squeeze(scube.filled_data[:,:,:].T).value #squeeze to remove singular stokes axis if present
         cube[np.isfinite(cube) == False] = 0.0
+        
         try:
             beamtab=scube.beam
         except:
@@ -377,7 +379,13 @@ class pymakeplots:
                     beamvals=[scube.header['bmaj'],scube.header['bmin']]
                     beamtab=Beam(major=np.max(beamvals)*u.deg,minor=np.min(beamvals)*u.deg,pa=self.spectralcube.header['bpa']*u.deg)
                 except:
-                    beamtab=False           
+                    beamtab=False   
+                     
+        if beamtab.major.value ==0:
+            ### MeerKAT style beams
+            beamvals=[np.mean([scube.header['bmaj1'],scube.header['bmaj3826']]),np.mean([scube.header['bmin1'],scube.header['bmin3826']])]
+            beamtab=Beam(major=np.max(beamvals)*u.deg,minor=np.min(beamvals)*u.deg,pa=np.mean([scube.header['bpa1'],scube.header['bpa3826']])*u.deg)
+     
         if primary:
             self.spectralcube=scube
             self.repfreq=np.median(self.spectralcube.with_spectral_unit(u.GHz).spectral_axis)
@@ -705,11 +713,14 @@ class pymakeplots:
         
     def add_beam(self,ax):
         aux_tr_box = AuxTransformBox(ax.transData)
-                
-        if self.all_axes_physical:
-            aux_tr_box.add_artist(Ellipse((0, 0), width=self.ang2kpctrans(self.bmaj), height=self.ang2kpctrans(self.bmin), angle=self.bpa+90,edgecolor='black',facecolor='none',linewidth=1.5))                 
+        if self.rotate!=None:
+            rotang=self.rotate
         else:
-            aux_tr_box.add_artist(Ellipse((0, 0), width=self.bmaj, height=self.bmin, angle=self.bpa+90,edgecolor='black',facecolor='none',linewidth=1.5))                 
+            rotang=0        
+        if self.all_axes_physical:
+            aux_tr_box.add_artist(Ellipse((0, 0), width=self.ang2kpctrans(self.bmaj), height=self.ang2kpctrans(self.bmin), angle=self.bpa+90+rotang,edgecolor='black',facecolor='none',linewidth=1.5))                 
+        else:
+            aux_tr_box.add_artist(Ellipse((0, 0), width=self.bmaj, height=self.bmin, angle=self.bpa+90+rotang,edgecolor='black',facecolor='none',linewidth=1.5))                 
         box = AnchoredOffsetbox(child=aux_tr_box, loc='lower left', pad=0.5, borderpad=0.4,frameon=False)
         ax.add_artist(box)                     
 
@@ -761,7 +772,31 @@ class pymakeplots:
 
         rotmat=np.array([[np.cos(np.deg2rad(self.rotate)),-np.sin(np.deg2rad(self.rotate))],[np.sin(np.deg2rad(self.rotate)),np.cos(np.deg2rad(self.rotate))]])
         dx1,dx2=np.dot(rotmat,np.array([0,length2use]))
-        aux_tr_box.add_artist(Arrow(0, 0,dx1,dx2,color='k'))
+        if (dx1 <0)&(dx2<0):
+            #lower left quadrant
+            startx,starty= np.abs(dx1), np.abs(dx2)
+            endx,endy=0,0
+            ha='right'
+        if (dx1 <0)&(dx2>0):
+            #upper left quadrant
+            startx,starty= 0,0
+            endx,endy= dx1,dx2 
+            ha='right'  
+        if (dx1 >0)&(dx2>0):
+            #upper right quadrant
+            startx,starty= 0,0
+            endx,endy= dx1, dx2
+            ha='left'
+        if (dx1 >0)&(dx2<0):
+            #lower right quadrant
+            startx,starty= -np.abs(dx1), np.abs(dx2)    
+            endx,endy=0,0
+            ha='left'
+            
+        aux_tr_box.add_artist(Text(endx,endy,'N',color='k',ha=ha,fontsize='small',va='center'))
+        aux_tr_box.add_artist(FancyArrowPatch((startx,starty), (endx,endy),
+                                         mutation_scale=100,color='k',arrowstyle='->,head_length=0.1, head_width=0.05'))
+                                         
         box = AnchoredOffsetbox(child=aux_tr_box, loc=loc, frameon=False)
         ax.add_artist(box)
         #ax.text(3, y + 0.05, bracketstyle, ha="center", va="bottom", fontsize=14)   
@@ -1234,7 +1269,6 @@ class pymakeplots:
         ylab="Unknown"
         
         if (''.join(self.bunit.split())).lower() == "Jy/beam".lower():
-            
             spec*=1/self.beam_area()
             spec_mask*=1/self.beam_area()
             
