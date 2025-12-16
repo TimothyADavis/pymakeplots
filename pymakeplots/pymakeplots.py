@@ -55,12 +55,16 @@ class pymakeplots:
         self.pbcorr_cube=None
         self.spectralcube=None
         self.mask=None
+        self.masksmoothing=0
+        self.maskdilating=0
         self.flat_cube_trim=None
         self.pbcorr_cube_trim=None
         self.mask_trim=None
+        self.pbcliplevel=None
         self.bmaj=None
         self.rotate=rotate
         self.smoothmask_spatial=1.5
+        self.smoothmask_velocity=4
         self.bmin=None
         self.bpa=None
         self.xcoord,self.ycoord,self.vcoord = None, None, None
@@ -97,6 +101,7 @@ class pymakeplots:
         self.suppress_subbeam_artifacts=False
         self.mom1_cmap=sauron
         self.mom2_cmap=sauron
+        self.pb_radial_cut=False
         #self.wcs=None
         
         if (cube != None)&(pb==None)&(cube_flat==None):
@@ -184,11 +189,25 @@ class pymakeplots:
         :return: (ndarray) mask to apply to the un-clipped cube
         """
         sigma = self.smoothmask_spatial * self.bmaj / self.cellsize
-        smooth_cube = ndimage.uniform_filter(cube, size=[sigma, sigma,4], mode='constant')  # mode='nearest'
+        smooth_cube = ndimage.uniform_filter(cube, size=[sigma, sigma,self.smoothmask_velocity], mode='constant')  # mode='nearest'
         newrms= self.rms_estimate(smooth_cube,0,1) 
-        self.cliplevel=self.rms*self.rmsfac 
+        self.cliplevel=self.rms*self.rmsfac
+        
+        if self.pb_radial_cut or self.pbcliplevel!=None:
+            np.seterr(all='ignore')
+            pb=np.divide(self.flat_cube_trim,self.pbcorr_cube_trim)#,where=self.pbcorr_cube_trim!=0)
+         
         self.maskcliplevel=newrms*self.rmsfac   
-        mask=(smooth_cube > self.maskcliplevel)
+        
+        if self.pb_radial_cut:
+            mask=(smooth_cube > np.divide(self.maskcliplevel,np.abs(pb),where=pb!=0))
+        else:
+            mask=(np.abs(smooth_cube) > self.maskcliplevel)
+            
+            
+        
+        if self.pbcliplevel!=None:
+            mask[pb<self.pbcliplevel]=False
         
         if self.suppress_subbeam_artifacts:
             label,cnt=ndimage.label(mask)#.sum(axis=2))
@@ -196,6 +215,52 @@ class pymakeplots:
             beampix=(self.bmaj*self.bmin)/(self.cellsize**2)
             for thelabel in lab[0:-1][hist<(beampix*self.suppress_subbeam_artifacts)]:
                 mask[label == thelabel]=False
+        #maskorig=mask.copy()
+        if self.masksmoothing>0:
+            expand_by_npix=self.masksmoothing
+            print(expand_by_npix)
+            # structure = np.zeros([3, expand_by_npix * 2 + 1, expand_by_npix * 2 + 1])
+            # Y, X = np.ogrid[:expand_by_npix * 2 + 1, :expand_by_npix * 2 + 1]
+            # R = np.sqrt((X - expand_by_npix) ** 2 + (Y - expand_by_npix) ** 2)
+            # structure[1, :] = R <= expand_by_npix
+            # mask = ndimage.binary_dilation(mask, iterations=1, structure=structure)
+            #breakpoint()
+            mask = ndimage.binary_dilation(mask, iterations=expand_by_npix,axes=(0,1,2))
+            
+            '''
+            r=np.linspace(1,0,self.masksmoothing+1,endpoint=False)[1:]
+            facs=np.exp(-((r-1)**2/(2*(0.33)**2)))
+            
+            maskorig=mask.copy()
+            struct1 = ndimage.generate_binary_structure(2, 1)
+            for i,fac in enumerate(facs):
+                mask2 = ndimage.grey_dilation(maskorig.astype(float), (int(i+1),int(i+1),0), mode='constant')  #
+                mask=np.fmax(mask,mask2*facs[i])
+            '''
+            #
+            #
+            #from kinms import KinMS
+            #from astropy.convolution import convolve
+            #psf=KinMS.makebeam(1,32, 32, [self.masksmoothing,self.masksmoothing,0])
+            
+            #for i in range(0,mask.shape[2]):
+            #    mask[:, :, i] = convolve(mask[:, :, i], psf) #binary
+            #mask=mask.astype(float)    
+            #for i in range(0,mask.shape[2]):    
+            #    mask[:, :, i] = convolve(mask[:, :, i], psf) #smooth
+            #mask[mask<maskorig]=maskorig[mask<maskorig]    
+            #mask=np.fmax(mask,maskorig)    
+        #mask = ndimage.uniform_filter(mask.astype(float), size=[self.masksmoothing,self.masksmoothing,0], mode='constant')  #
+            #print(mask.sum())
+            
+            
+            
+            #mask = ndimage.gaussian_filter(mask.astype(float), [self.masksmoothing,self.masksmoothing,0], mode='constant')  #
+            #if self.maskdilating != 0:
+            #    mask=ndimage.grey_dilation(mask.astype(float), size=(np.round(self.maskdilating).astype(int),np.round(self.maskdilating).astype(int),0))
+
+        
+        #breakpoint()
         
         return mask      
 
@@ -1262,10 +1327,14 @@ class pymakeplots:
         
         mask2d=self.mask_trim.sum(axis=2).reshape((self.mask_trim.shape[0],self.mask_trim.shape[1],1)).astype(bool)
         mask2d=ndimage.binary_dilation(mask2d,iterations=2)
-        spec=(self.pbcorr_cube[self.spatial_trim[0]:self.spatial_trim[1],self.spatial_trim[2]:self.spatial_trim[3],:]*mask2d).sum(axis=0).sum(axis=0)
-        
+        if self.bunit == "K":
+            spec=np.nanmean(self.pbcorr_cube[self.spatial_trim[0]:self.spatial_trim[1],self.spatial_trim[2]:self.spatial_trim[3],:],axis=(0,1))*1e3
+            spec_mask=np.nanmean((self.pbcorr_cube_trim*self.mask_trim),axis=(0,1))*1e3
+        else:
+            spec=(self.pbcorr_cube[self.spatial_trim[0]:self.spatial_trim[1],self.spatial_trim[2]:self.spatial_trim[3],:]*mask2d).sum(axis=0).sum(axis=0)
+            spec_mask=(self.pbcorr_cube_trim*self.mask_trim).sum(axis=0).sum(axis=0)
 
-        spec_mask=(self.pbcorr_cube_trim*self.mask_trim).sum(axis=0).sum(axis=0)
+        
         ylab="Unknown"
         
         if (''.join(self.bunit.split())).lower() == "Jy/beam".lower():
@@ -1279,7 +1348,7 @@ class pymakeplots:
             else:
                 ylab="Flux Density (Jy)"
         if self.bunit == "K":
-            ylab="Brightness Temp. (K)"
+            ylab="Brightness Temp. (mK)"
             
         if nsum:
             spec=np.append(running_mean(spec,nsum),spec[-1])
