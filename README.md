@@ -1,3 +1,4 @@
+# pymakeplots
 <img style="float:top,right" src="https://github.com/TimothyADavis/pymakeplots/blob/master/NGC1684_allplots.png">
 
 [![Python 3.8](https://img.shields.io/badge/python-3.8-blue.svg)](https://www.python.org/downloads/release/python-382/) [![PyPI version](https://badge.fury.io/py/pymakeplots.svg)](https://badge.fury.io/py/pymakeplots) 
